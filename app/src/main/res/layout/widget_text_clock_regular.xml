@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Regular-weight variant of widget_text_clock, used for the secondary (NYC) clock so it
+     reads as a subdued reference rather than competing with the bold local time. -->
+<TextClock xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_text_clock"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:fontFamily="sans-serif"
+    android:includeFontPadding="false"
+    android:gravity="center_vertical"
+    android:maxLines="1" />

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Widget card outline -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:pathData="M34,35 h40 a6,6 0 0 1 6,6 v26 a6,6 0 0 1 -6,6 h-40 a6,6 0 0 1 -6,-6 v-26 a6,6 0 0 1 6,-6 z" />
+    <!-- Sun / clock face -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,50 m-6.5,0 a6.5,6.5 0 1,0 13,0 a6.5,6.5 0 1,0 -13,0 z" />
+    <!-- Content line next to the sun -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M56,48 h16 a2,2 0 0 1 0,4 h-16 a2,2 0 0 1 0,-4 z" />
+    <!-- Bottom content line -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37,61 h34 a2,2 0 0 1 0,4 h-34 a2,2 0 0 1 0,-4 z" />
+</vector>

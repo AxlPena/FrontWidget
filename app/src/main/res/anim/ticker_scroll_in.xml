@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Incoming marquee copy slides in from exactly its OWN width to the right. The "%" suffix (not
+     "%p") means the delta is a percentage of the ANIMATED VIEW's own width, so with two identical,
+     full-text copies this starts the incoming copy tiled precisely one text-width to the right of
+     the outgoing one. As the outgoing tail leaves the clip window the incoming head enters in
+     perfect alignment, reading as one seamless, continuously scrolling strip (no ghosting).
+
+     Duration equals the flipper's flipInterval so the motion never pauses (a pause at offset 0
+     is what made the old per-char version stutter). Linear velocity is intentional: a continuous
+     marquee must move at a constant speed - this is exactly what Compose's Modifier.basicMarquee
+     does - whereas an eased curve would visibly pulse (speed up / slow down) every loop. -->
+<translate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="6000"
+    android:fromXDelta="100%"
+    android:toXDelta="0%"
+    android:interpolator="@android:anim/linear_interpolator" />

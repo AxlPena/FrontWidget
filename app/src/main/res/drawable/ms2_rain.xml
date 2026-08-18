@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MERGED two-tone (FILLED): solid "cloud" (slate) + blue rain streaks. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:scaleX="0.8" android:scaleY="0.8" android:translateX="96" android:translateY="684">
+        <path
+            android:fillColor="#8CA0B3"
+            android:pathData="M260-160q-91 0-155.5-63T40-377q0-78 47-139t123-78q25-92 100-149t170-57q117 0 198.5 81.5T760-520q69 8 114.5 59.5T920-340q0 75-52.5 127.5T740-160H260Z" />
+    </group>
+    <path
+        android:strokeColor="#4FA6E8"
+        android:strokeWidth="46"
+        android:strokeLineCap="round"
+        android:pathData="M348,600 l-34,150 M498,600 l-34,150 M648,600 l-34,150" />
+</vector>

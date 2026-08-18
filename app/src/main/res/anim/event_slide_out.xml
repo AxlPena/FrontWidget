@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Outgoing event: pairs with event_slide_in for a Material "shared axis X" transition. The frame
+     glides a short distance toward the trailing (left) edge while fading out quickly, so it clears
+     the stage before the incoming frame's fade ramps up (avoids ghosting). Standard fast-out-slow-in
+     easing; motion stays in lockstep with the incoming frame and finishes under 300ms. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/fast_out_slow_in"
+    android:shareInterpolator="true">
+
+    <translate
+        android:duration="280"
+        android:fromXDelta="0"
+        android:toXDelta="-28%p" />
+
+    <alpha
+        android:duration="110"
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0" />
+</set>

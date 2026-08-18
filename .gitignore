@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration (SDK path, machine-specific) — must never be committed
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing material — never commit keystores or their credentials
+*.jks
+*.keystore
+keystore.properties
+release/
+
+# Logs / misc
+*.log
+
+# JVM heap/crash dumps (e.g. Gradle OOM) — huge, never commit
+*.hprof
+
+# Local dev scratch: on-device test screenshots, UI dumps, logs, one-off scripts & fixtures.
+# Anchored to the repo root so real sources (e.g. app/src/main/assets) are never affected.
+/*.png
+/emu_ui_dump.xml
+/sdump.xml
+/tick_dump.xml
+/tick_dump2.xml
+/tl.xml
+/logcat_live.txt
+/paylog.txt
+/scanlog.txt
+/wtest/
+/assets/
+/backup/

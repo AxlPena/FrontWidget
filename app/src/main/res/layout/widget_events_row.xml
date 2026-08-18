@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The events section. Widgets can't receive swipe/drag gestures (RemoteViews only gets taps, and
+     the launcher owns horizontal swipes), so left/right navigation is done with tappable ‹ / ›
+     arrows. Those arrows now live INSIDE each flipper frame (see widget_event_frame.xml) so the
+     visible frame always carries the correct prev/next targets, making navigation deterministic.
+
+     The center area holds two mutually-exclusive views:
+       - events_flipper: holds every event when there are 2+; the shown child is set explicitly (it
+         does NOT auto-advance). Arrow taps set the shown event via the widget's Glance state.
+       - events_single: a static holder used for exactly one event, so we DON'T run a one-child
+         flipper (a single-child ViewFlipper re-plays its animation every interval and flickers). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <!-- autoStart is OFF on purpose: a self-advancing ViewFlipper runs on its own timer that we can't
+         read or reliably override, so arrow taps raced the auto-cycle. The shown child is now driven
+         deterministically from the widget's Glance state (FrontWidget.EVENTS_INDEX_KEY) via
+         setDisplayedChild, so ‹ / › always land exactly on the right event. The in/out animations
+         still play on setDisplayedChild, so navigation keeps its slide. -->
+    <ViewFlipper
+        android:id="@+id/events_flipper"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:autoStart="false"
+        android:measureAllChildren="true"
+        android:clipChildren="true"
+        android:inAnimation="@anim/event_slide_in"
+        android:outAnimation="@anim/event_slide_out" />
+
+    <FrameLayout
+        android:id="@+id/events_single"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+</FrameLayout>

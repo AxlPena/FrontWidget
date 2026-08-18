@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paired with ticker_scroll_in: the outgoing marquee copy slides left by exactly its OWN width
+     ("%" = percentage of the animated view's own width). Because both copies are identical and
+     offset by one full text-width, the incoming copy's head enters the clip window exactly as this
+     copy's tail leaves it - a seamless infinite marquee with no doubled/ghosted glyphs. Duration
+     matches the flipInterval so the scroll is continuous. -->
+<translate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="6000"
+    android:fromXDelta="0%"
+    android:toXDelta="-100%"
+    android:interpolator="@android:anim/linear_interpolator" />

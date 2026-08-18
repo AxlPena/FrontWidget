@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The two-line NYC reference block (live NYC time over "NYC, US") rendered as a single
+     RemoteViews, mirroring widget_location_block so its two lines stack with the exact same
+     native spacing as the locality / "region, COUNTRY" block to its left. Both lines are
+     wrap_content with includeFontPadding="false" and the layout is center_vertical, so the
+     label hugs the time the same way the region hugs the locality. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="vertical">
+
+    <TextClock
+        android:id="@+id/nyc_clock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif"
+        android:includeFontPadding="false"
+        android:maxLines="1" />
+
+    <TextView
+        android:id="@+id/nyc_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:includeFontPadding="false" />
+</LinearLayout>

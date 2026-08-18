@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Alarm text + optional system-timer countdown as ONE native line, so the alarm label, the
+     hourglass and the self-ticking Chronometer all share a single center_vertical baseline.
+     Rendering these together (instead of mixing a Glance Text with an embedded RemoteViews) is
+     what keeps the countdown on the same line as the alarm: a Glance Text carries font padding
+     the Chronometer doesn't, so centering them separately left the timer sitting high off the
+     line. match_parent height + center_vertical lets it fill the pinned Glance row and centre. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:id="@+id/alarm_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:includeFontPadding="false"
+        android:maxLines="1" />
+
+    <LinearLayout
+        android:id="@+id/timer_group"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/timer_icon"
+            android:layout_width="15dp"
+            android:layout_height="15dp"
+            android:layout_marginEnd="4dp"
+            android:src="@drawable/ic_hourglass"
+            android:importantForAccessibility="no" />
+
+        <Chronometer
+            android:id="@+id/timer_chrono"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:includeFontPadding="false"
+            android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

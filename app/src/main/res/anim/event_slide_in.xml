@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Incoming event: a Material "shared axis X" transition. The frame glides a short distance from
+     the leading (right) edge into place while fading in, so the text reads as flowing forward rather
+     than hard-cutting. The fade is delayed slightly (startOffset) so it ramps up only after the
+     outgoing frame has mostly faded, which keeps the two from stacking at partial opacity (the
+     ghosting a plain cross-fade produced). Standard fast-out-slow-in easing; total < 300ms. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/fast_out_slow_in"
+    android:shareInterpolator="true">
+
+    <translate
+        android:duration="280"
+        android:fromXDelta="28%p"
+        android:toXDelta="0" />
+
+    <alpha
+        android:startOffset="70"
+        android:duration="210"
+        android:fromAlpha="0.0"
+        android:toAlpha="1.0" />
+</set>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Fire an exact one-shot at a timer's finish so the widget flips to the ended state on time
+         (this is a timer feature, which is the intended use of USE_EXACT_ALARM). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Needed to (re)start a system timer via ACTION_SET_TIMER from the ended-timer refresh button. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <queries>
+        <package android:name="me.proton.android.calendar" />
+        <package android:name="com.google.android.calendar" />
+        <package android:name="com.google.android.deskclock" />
+        <package android:name="com.android.deskclock" />
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".FrontWidgetApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.FrontWidget"
+        tools:replace="android:theme">
+
+        <receiver
+            android:name=".FrontWidgetReceiver"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/front_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".WidgetCycleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.CYCLE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".RegionTickerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.REGION_TICK" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".EventClickReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.OPEN_EVENT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Debug-only: dumps the persisted events (incl. eventId) to logcat tag "EventDump".
+             Exported so it can be triggered via `adb shell am broadcast`. -->
+        <receiver
+            android:name=".DumpEventsReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.DUMP_EVENTS" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".DebugLocationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.TEST_LOCATION" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".TimerExpiryReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.TIMER_EXPIRY" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".EventNavReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.EVENTS_GO" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".TimerListenerService"
+            android:label="FrontWidget Timer"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Use WorkManager on-demand init (see FrontWidgetApp) by removing the default
+             initializer, so Proton's androidx.startup initializers can safely call
+             WorkManager.getInstance() during ContentProvider creation. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+        </provider>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.FrontWidget">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

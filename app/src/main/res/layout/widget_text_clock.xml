@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live, self-ticking clock/date for the widget. TextClock is updated by the OS every
+     minute against the given timezone (and honors the device 12h/24h setting), so the
+     widget's time/date stay accurate without any app-driven refresh. -->
+<TextClock xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_text_clock"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:fontFamily="sans-serif-medium"
+    android:includeFontPadding="false"
+    android:gravity="center_vertical"
+    android:maxLines="1" />

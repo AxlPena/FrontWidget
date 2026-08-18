@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One of the two identical, full-region copies inside loc_ticker_flipper. Its width is set
+     explicitly at render time (setViewLayoutWidth) to the measured text width, larger than the
+     fixed-width flipper, so the flipper clips it to the marquee window while the in/out animations
+     translate it by its own width for a seamless, continuous scroll.
+
+     MONOSPACE is deliberate: the two copies must be tiled EXACTLY one text-width apart or they
+     overlap ("ghost"). We size each copy from a Paint measurement, and only a monospace font has a
+     deterministic advance that matches the launcher's actual rendering on every device (a
+     proportional system font - e.g. Sony's - can render wider than measured, causing overlap). -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ticker_frame_text"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:singleLine="true"
+    android:fontFamily="monospace"
+    android:includeFontPadding="false" />

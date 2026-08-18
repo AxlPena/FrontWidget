@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The two-line location block (locality over "region, COUNTRY") rendered as a single
+     RemoteViews so native LinearLayout measurement applies.
+
+     - line1 (locality) is never capped, so the city name is always shown in full.
+     - line2 splits into a region name + a country code. Only the region ellipsizes: it caps at
+       maxWidth and shows "..." when long, while the country code (loc_country) is wrap_content and
+       always fully visible to its right. This keeps ", FR"/", US" readable and stops an oversized
+       region from pushing the NYC block off the right edge.
+
+     (True marquee scrolling isn't possible in a widget: RemoteViews forbids View.setSelected,
+     the call that starts a TextView marquee, so static end-ellipsis is used instead.) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent"
+    android:gravity="center_vertical"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/loc_line1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:textStyle="bold"
+        android:includeFontPadding="false" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <!-- ELLIPSIS mode: region is capped so "region, COUNTRY" stays within the width proven safe
+             against the NYC block (~84dp total). It ellipsizes past that; the country code below
+             never does. -->
+        <TextView
+            android:id="@+id/loc_region"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="64dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:includeFontPadding="false" />
+
+        <TextView
+            android:id="@+id/loc_country"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:includeFontPadding="false" />
+
+        <!-- TICKER mode: a true marquee window. This is a FIXED-WIDTH ViewFlipper (clipChildren keeps
+             its content inside those bounds) holding TWO identical, full "region, COUNTRY" copies.
+             The in/out animations translate each copy by its OWN width, so the copies stay tiled and
+             the whole line scrolls continuously and seamlessly through the window - the launcher runs
+             it in its own process, so no app re-render or alarm is needed. The width is overridden at
+             render time (API 31+ setViewLayoutWidth) to track the city name; this value is the older
+             fallback. GONE unless ticker is active AND the line actually overflows. -->
+        <ViewFlipper
+            android:id="@+id/loc_ticker_flipper"
+            android:layout_width="96dp"
+            android:layout_height="wrap_content"
+            android:autoStart="true"
+            android:flipInterval="6000"
+            android:clipChildren="true"
+            android:inAnimation="@anim/ticker_scroll_in"
+            android:outAnimation="@anim/ticker_scroll_out"
+            android:visibility="gone" />
+
+        <!-- TICKER mode: the ", COUNTRY" suffix, pinned static to the right of the scrolling region
+             window so only the region moves. GONE unless ticker is active. -->
+        <TextView
+            android:id="@+id/loc_ticker_country"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:visibility="gone"
+            android:fontFamily="monospace"
+            android:includeFontPadding="false" />
+
+        <!-- FLIP mode: a ViewFlipper that auto-alternates between two halves of the full
+             "region, COUNTRY" every 2.5s (self-animates in the host, no app pushes needed). GONE
+             unless flip mode is active. Frames are capped at the same NYC-safe width the ellipsis
+             region uses: with measureAllChildren the flipper takes the WIDER (currently hidden)
+             frame's width, so uncapped a long half would balloon the block and shove the NYC clock
+             past the right edge (clipping its "AM/PM"). Capping + end-ellipsis keeps the block
+             bounded; an over-long half ellipsizes, matching ellipsis mode. -->
+        <ViewFlipper
+            android:id="@+id/loc_flipper"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:autoStart="true"
+            android:flipInterval="2500"
+            android:measureAllChildren="true"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/loc_flip_a"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxWidth="84dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/loc_flip_b"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxWidth="84dp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+        </ViewFlipper>
+    </LinearLayout>
+</LinearLayout>

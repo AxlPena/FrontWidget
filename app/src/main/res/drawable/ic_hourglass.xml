@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bowtie-style hourglass: flat caps top and bottom with two filled triangles
+     meeting at a thin waist. Drawn black by default; the widget tints it to the
+     theme color at runtime. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M5,3L19,3L19,4.6L12,11.4L5,4.6Z M5,21L19,21L19,19.4L12,12.6L5,19.4Z" />
+</vector>

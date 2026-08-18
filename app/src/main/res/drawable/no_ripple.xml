@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fully transparent background used as a Glance clickable rippleOverride so the
+     hidden triple-tap area shows no glow/highlight and no tap animation. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@android:color/transparent" />
+</shape>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MERGED two-tone (FILLED): solid "cloud" (slate) + solid "bolt" (amber). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:scaleX="0.8" android:scaleY="0.8" android:translateX="96" android:translateY="704">
+        <path
+            android:fillColor="#8CA0B3"
+            android:pathData="M260-160q-91 0-155.5-63T40-377q0-78 47-139t123-78q25-92 100-149t170-57q117 0 198.5 81.5T760-520q69 8 114.5 59.5T920-340q0 75-52.5 127.5T740-160H260Z" />
+    </group>
+    <group android:scaleX="0.5" android:scaleY="0.5" android:translateX="240" android:translateY="900">
+        <path
+            android:fillColor="#FFB300"
+            android:pathData="M360-360H236q-24 0-35.5-21.5T203-423l299-430q10-14 26-19.5t33 .5q17 6 25 21t6 32l-32 259h155q26 0 36.5 23t-6.5 43L416-100q-11 13-27 17t-31-3q-15-7-23.5-21.5T328-139l32-221Z" />
+    </group>
+</vector>

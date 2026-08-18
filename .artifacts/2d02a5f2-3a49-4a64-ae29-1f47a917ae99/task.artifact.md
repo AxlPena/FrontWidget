@@ -1,0 +1,8 @@
+- [ ] Add weather vector drawable resources
+- [ ] Update `WeatherWorker.kt` to fetch actual location and store weather icon info
+- [ ] Refine `FrontWidget.kt`:
+    - [ ] Update `ClockDisplay` for dynamic timezones and NYC reference
+    - [ ] Add `WeatherDisplay` with icons and condition mapping
+    - [ ] Make "UPCOMING" section conditional on data availability
+    - [ ] Improve `getAlarmIntent()` robustness
+- [ ] Verify functionality in emulator (location, timezone, icons, events)

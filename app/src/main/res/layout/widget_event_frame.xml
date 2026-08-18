@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One frame of the events flipper: its own ‹ / › arrows flank an event's title over its "when"
+     line (with an optional "n/total" counter). The arrows live INSIDE the frame on purpose: the
+     launcher auto-advances the flipper in its own process, so the app can't read which child is
+     showing. By baking each frame's prev/next targets into that frame, whatever frame is visible
+     always carries the correct neighbors (with wrap), so navigation is deterministic and never
+     drifts. Text sizes are baked here; colors are themed at render time (setTextColor). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/event_frame_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:id="@+id/event_prev"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center"
+        android:text="‹"
+        android:textSize="24sp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:includeFontPadding="false" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/event_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="15sp"
+            android:fontFamily="sans-serif-medium"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:includeFontPadding="false" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/event_when"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:singleLine="true"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/event_counter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:textSize="11sp"
+                android:singleLine="true"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/event_next"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center"
+        android:text="›"
+        android:textSize="24sp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:includeFontPadding="false" />
+</LinearLayout>
