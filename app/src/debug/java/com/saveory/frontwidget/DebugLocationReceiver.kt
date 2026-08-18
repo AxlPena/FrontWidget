@@ -9,10 +9,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Debug-only: inject an arbitrary weather location so we can eyeball how the clock row's location
- * block renders long city/region names (ellipsis, NYC-block safety) without waiting on a real
- * geocode. Unlike launching MainActivity, a broadcast does NOT trip onAccountReady -> refreshWidget,
- * so the injected values aren't immediately overwritten by a weather fetch.
+ * Debug-only (src/debug): inject an arbitrary weather location so we can eyeball how the clock row's
+ * location block renders long city/region names (ellipsis, NYC-block safety) without waiting on a
+ * real geocode. Unlike launching MainActivity, a broadcast does NOT trip onAccountReady ->
+ * refreshWidget, so the injected values aren't immediately overwritten by a weather fetch.
+ *
+ * Because this receiver is exported (so `adb` can reach it) it is deliberately compiled ONLY into
+ * debug builds — it must never be present in a release APK, where an exported receiver would let any
+ * installed app spoof the widget's displayed location.
  *
  *   adb shell "am broadcast -a com.saveory.frontwidget.action.TEST_LOCATION \
  *     --es locality 'SAN FRANCISCO' --es region 'Northern California' --es country US"

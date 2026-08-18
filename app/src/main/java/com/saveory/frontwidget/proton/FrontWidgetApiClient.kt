@@ -1,6 +1,7 @@
 package com.saveory.frontwidget.proton
 
 import android.os.Build
+import com.saveory.frontwidget.BuildConfig
 import me.proton.core.network.domain.ApiClient
 import javax.inject.Inject
 
@@ -12,7 +13,9 @@ class FrontWidgetApiClient @Inject constructor() : ApiClient {
 
     override val appVersionHeader: String = "android-calendar@2.29.0"
 
-    override val enableDebugLogging: Boolean = true
+    // Debug builds only: Proton Core's verbose network logging can emit request/response and
+    // session details to logcat, which must never happen in a shipped release.
+    override val enableDebugLogging: Boolean = BuildConfig.DEBUG
 
     override val userAgent: String
         get() = "FrontWidget/1.0 (Android ${Build.VERSION.RELEASE}; ${Build.BRAND} ${Build.MODEL})"

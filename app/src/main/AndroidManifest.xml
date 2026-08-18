@@ -91,23 +91,8 @@
             </intent-filter>
         </receiver>
 
-        <!-- Debug-only: dumps the persisted events (incl. eventId) to logcat tag "EventDump".
-             Exported so it can be triggered via `adb shell am broadcast`. -->
-        <receiver
-            android:name=".DumpEventsReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.saveory.frontwidget.action.DUMP_EVENTS" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name=".DebugLocationReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.saveory.frontwidget.action.TEST_LOCATION" />
-            </intent-filter>
-        </receiver>
+        <!-- NOTE: the exported debug receivers (DumpEventsReceiver / DebugLocationReceiver) now live
+             in src/debug/AndroidManifest.xml so they are only present in debug builds. -->
 
         <receiver
             android:name=".TimerExpiryReceiver"

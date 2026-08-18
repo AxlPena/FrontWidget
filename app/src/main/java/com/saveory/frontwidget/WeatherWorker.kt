@@ -13,6 +13,7 @@ import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.saveory.frontwidget.BuildConfig
 import com.saveory.frontwidget.data.Constants
 import com.saveory.frontwidget.data.WeatherApi
 import com.saveory.frontwidget.data.WeatherProviders
@@ -45,7 +46,10 @@ class WeatherWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 getCurrentLocation(fusedClient) ?: getLastLocation(fusedClient)
             }
 
-            Log.d(TAG, "Location found: ${location?.latitude}, ${location?.longitude}")
+            // Precise coordinates are PII: only log them in debug builds, never in release logcat.
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Location found: ${location?.latitude}, ${location?.longitude}")
+            }
 
             // Strictly device-based: if no GPS fix, reuse the last real fix; never fake a location.
             val cachedLat = prefs.getFloat("location_lat", Float.NaN)
@@ -60,7 +64,7 @@ class WeatherWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
             // Use system Geocoder for more accurate Locality and Region (State/Prefecture)
             val address = getAddress(lat, lon)
-            Log.d(TAG, "Full Address: $address")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Full Address: $address")
 
             val retrofit = Retrofit.Builder()
                 .baseUrl(Constants.WEATHER_BASE_URL)
@@ -97,7 +101,7 @@ class WeatherWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 ?: reading.fallbackCountry.takeIf { it.isNotBlank() }
                 ?: "")
 
-            Log.d(TAG, "Resolved Address: $locality, $region, $country")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Resolved Address: $locality, $region, $country")
 
             // Save weather to SharedPreferences for the widget to read
             prefs.edit().apply {

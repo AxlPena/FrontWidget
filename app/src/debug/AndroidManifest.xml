@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only components. These receivers are exported so they can be triggered from
+     `adb shell am broadcast` during development, but they must NOT ship in release: they dump
+     persisted calendar events to logcat and let any app inject the widget's displayed location.
+     Living in src/debug/ means the manifest merger only adds them to debug builds. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!-- Dumps the persisted events (incl. eventId + title) to logcat tag "EventDump". -->
+        <receiver
+            android:name=".DumpEventsReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.DUMP_EVENTS" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Injects an arbitrary weather location so we can eyeball long-name rendering. -->
+        <receiver
+            android:name=".DebugLocationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.TEST_LOCATION" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

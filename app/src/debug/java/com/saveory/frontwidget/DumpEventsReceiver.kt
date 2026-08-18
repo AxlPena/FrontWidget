@@ -10,12 +10,15 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Debug-only inspector for the widget's persisted events. Trigger it with:
+ * Debug-only (src/debug) inspector for the widget's persisted events. Trigger it with:
  *   adb shell am broadcast -a com.saveory.frontwidget.action.DUMP_EVENTS -n com.saveory.frontwidget/.DumpEventsReceiver
  * then read: adb logcat -s EventDump
  *
  * Logs the raw proton_events_json from widget_prefs plus each parsed event's fields (notably the
  * eventId now used to deep-link into Proton Calendar), so we can verify the store without root.
+ *
+ * This writes potentially sensitive calendar data (event titles) to logcat and is exported so `adb`
+ * can reach it, so it is compiled ONLY into debug builds and never shipped in a release APK.
  */
 class DumpEventsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
