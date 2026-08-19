@@ -12,11 +12,17 @@
     android:orientation="horizontal"
     android:gravity="center_vertical">
 
+    <!-- ‹ prev sits on the LEFT, sized to exactly the widget's content inset (EVENTS_ROW_INSET_DP,
+         20dp) and centered in that box. The events row is the only section rendered WITHOUT that left
+         inset (see FrontWidget: container padding start=0, every other section pads start by the inset),
+         so this arrow occupies the reclaimed inset space and the title/"when" below start at the inset
+         edge — i.e. FLUSH-LEFT with the date/clock/weather/alarm. That's how the left arrow and a
+         left-aligned title coexist without clipping. -->
     <TextView
         android:id="@+id/event_prev"
-        android:layout_width="wrap_content"
+        android:layout_width="20dp"
         android:layout_height="wrap_content"
-        android:minWidth="48dp"
+        android:minWidth="0dp"
         android:minHeight="48dp"
         android:gravity="center"
         android:text="‹"
@@ -69,7 +75,7 @@
         android:id="@+id/event_next"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:minWidth="48dp"
+        android:minWidth="44dp"
         android:minHeight="48dp"
         android:gravity="center"
         android:text="›"

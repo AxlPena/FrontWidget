@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -157,8 +158,6 @@ class FrontWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(setOf(SMALL, MEDIUM, LARGE))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val alarmRepo = AlarmRepository(context)
-        
         val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
 
         val protonEvents = ProtonEventStore.load(context)
@@ -172,8 +171,6 @@ class FrontWidget : GlanceAppWidget() {
         // Arm the region scroll ticker only while ticker reveal mode is selected (no-op otherwise).
         RegionTicker.scheduleOrCancel(context)
 
-        val nextAlarm = alarmRepo.getNextAlarm()
-
         provideContent {
             val size = LocalSize.current
             // Subscribe to the shown-event index from Glance state: an arrow tap writes it via
@@ -184,6 +181,11 @@ class FrontWidget : GlanceAppWidget() {
             // Subscribe to the refresh nonce so a forceRefresh() (e.g. a timer state change) reliably
             // recomposes this widget even when a plain updateAll would be coalesced/dropped.
             currentState(UPDATE_NONCE_KEY)
+            // Read the next alarm HERE (not in the prelude): the prelude runs once per provideGlance,
+            // but an alarm change arrives via SystemChangeReceiver's forceRefresh, whose nonce bump
+            // only recomposes THIS lambda. Reading it here (not in the prelude) is what makes a newly
+            // set/removed alarm actually show up on that recompose - previously it stayed stale.
+            val nextAlarm = AlarmRepository(context).getNextAlarm()
             // Read the timer state HERE (not in the prelude): the prelude runs once per provideGlance,
             // but timer changes arrive via forceRefresh's nonce bump, which only recomposes this
             // lambda. TimerListenerService lives in the same process, so this shared SharedPreferences
@@ -553,6 +555,12 @@ class FrontWidget : GlanceAppWidget() {
         val isTall = size.height >= 200.dp
         val isUltraTall = size.height >= 400.dp
 
+        // Left inset is applied PER-SECTION (not on the container) so the events row can opt out of it
+        // and let its ‹ prev arrow live in that reclaimed space while the event title still lines up
+        // flush-left with every other section. The events frame's ‹ box is sized to exactly this inset
+        // (see widget_event_frame.xml's event_prev width). Top/bottom/end keep the normal padding.
+        val contentInset = if (isSmall) 12.dp else 20.dp
+
         // Optional M3 themed widget surface (dynamic-color aware) at the system corner radius, with
         // user-controlled opacity. On: text keeps its onSurface contrast on ANY wallpaper (critical
         // on OLED where wallpapers are usually dark). Off: frameless (text straight on the wallpaper).
@@ -563,11 +571,11 @@ class FrontWidget : GlanceAppWidget() {
                 .fillMaxSize()
                 .background(bg)
                 .cornerRadius(android.R.dimen.system_app_widget_background_radius)
-                .padding(if (isSmall) 12.dp else 20.dp)
+                .padding(top = contentInset, bottom = contentInset, end = contentInset)
         } else {
             GlanceModifier
                 .fillMaxSize()
-                .padding(if (isSmall) 12.dp else 20.dp)
+                .padding(top = contentInset, bottom = contentInset, end = contentInset)
         }
         // Center the content block vertically and pin it to the start (left) to match the KWGT look.
         // The whole surface is one big tap target (OpenAppAction); the inner sections keep their own
@@ -579,10 +587,86 @@ class FrontWidget : GlanceAppWidget() {
             modifier = containerModifier.clickable(actionRunCallback<OpenAppAction>(), R.drawable.no_ripple),
             contentAlignment = Alignment.CenterStart
         ) {
-        Column(
-            modifier = GlanceModifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.Start
-        ) {
+            when {
+                // Wide but short (the classic landscape / MEDIUM bucket, ~120-145dp tall): the
+                // date+clock+weather stack alone already fills the usable height, so appending the
+                // alarm+events below pushed them past the bottom edge and clipped them ("cut off
+                // events"). Instead lay the content out in TWO COLUMNS and spend the ample horizontal
+                // space: date/clock/weather on the left, alarm+events on the right. Nothing overflows
+                // and the events stay visible after rotating.
+                !isSmall && !isTall -> {
+                    Row(
+                        modifier = GlanceModifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = GlanceModifier.defaultWeight(),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            PrimarySections(
+                                clockTimeZoneId, weatherLocality, weatherRegion, weatherCountry,
+                                isNycTime, isSmall, isUltraTall,
+                                weatherCond, weatherTemp, weatherStatus, weatherIsDay, contentInset
+                            )
+                        }
+                        Spacer(modifier = GlanceModifier.width(16.dp))
+                        Column(
+                            modifier = GlanceModifier.defaultWeight(),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            SecondarySections(
+                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset
+                            )
+                        }
+                    }
+                }
+                // Tall enough (portrait / LARGE) or the tiny SMALL bucket: single vertical column.
+                // Alarm+events only stack under the primary block when there's both width and height
+                // for them (a narrow SMALL widget shows just date/clock/weather).
+                else -> {
+                    Column(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        PrimarySections(
+                            clockTimeZoneId, weatherLocality, weatherRegion, weatherCountry,
+                            isNycTime, isSmall, isUltraTall,
+                            weatherCond, weatherTemp, weatherStatus, weatherIsDay, contentInset
+                        )
+                        if (!isSmall && isTall) {
+                            SecondarySections(
+                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The always-shown top block: date header, the clock/location row and the weather line. Shared
+     * by the vertical (portrait) layout and the two-column (wide-short) layout so the two never drift.
+     */
+    @Composable
+    private fun PrimarySections(
+        clockTimeZoneId: String?,
+        weatherLocality: String,
+        weatherRegion: String,
+        weatherCountry: String,
+        isNycTime: Boolean,
+        isSmall: Boolean,
+        isUltraTall: Boolean,
+        weatherCond: String,
+        weatherTemp: String,
+        weatherStatus: String,
+        weatherIsDay: Boolean,
+        contentInset: Dp
+    ) {
+        val context = LocalContext.current
+        // Left inset lives here (not on the container) so the events row can skip it and slot its ‹
+        // arrow into the reclaimed space; every primary section still starts at the normal margin.
+        Column(modifier = GlanceModifier.fillMaxWidth().padding(start = contentInset)) {
             // Date Header - live TextClock so it rolls over at midnight without a refresh.
             val datePattern = if (isSmall) "MMM dd" else "EEEE, MMMM dd"
             AndroidRemoteViews(
@@ -606,78 +690,93 @@ class FrontWidget : GlanceAppWidget() {
             // row is already taller than its text (the icon sets the height), so an extra gap
             // reads as awkward padding above the line.
             WeatherDisplay(weatherCond, weatherTemp, weatherStatus, weatherIsDay, isSmall)
+        }
+    }
 
-            if (!isSmall) {
-                // Smaller than the gap below: the weather row above is icon-height, so its extra
-                // bottom padding already contributes visual space above the alarm.
-                Spacer(modifier = GlanceModifier.height(4.dp))
+    /**
+     * The alarm line (+ optional running/ended system timer controls) and the events flipper. Shared
+     * by both layouts: stacked beneath the primary block when tall, or placed in the right column
+     * when the widget is wide but short.
+     */
+    @Composable
+    private fun SecondarySections(
+        events: List<ProtonEvent>,
+        eventsIndex: Int,
+        nextAlarm: String,
+        timerFinishMs: Long,
+        timerTotalMs: Long,
+        localTimeZone: TimeZone,
+        contentInset: Dp
+    ) {
+        val context = LocalContext.current
+        // Smaller than the gap below: the weather row above is icon-height, so its extra
+        // bottom padding already contributes visual space above the alarm.
+        Spacer(modifier = GlanceModifier.height(4.dp))
 
-                // Alarm + system timer on ONE native line so the alarm label and the self-ticking
-                // countdown share a single baseline (see alarmLineRemoteViews). The row height is
-                // pinned and the native line fills it (fillMaxHeight), which both stops the embedded
-                // RemoteViews collapsing to ~0 height inside the Row and keeps the countdown's
-                // vertical position fixed when the restart/dismiss controls appear at expiry.
-                val nowMs = System.currentTimeMillis()
-                val hasTimer = timerFinishMs > 0L
-                val timerPassed = hasTimer && timerFinishMs <= nowMs
-                // The restart/dismiss controls stack vertically (refresh over X) so the pair stays
-                // narrow and fits beside the alarm+countdown on one line. The row must be tall enough
-                // for that two-button stack, so size it to the larger of the text line and the stack.
-                val alarmTextLineDp = 15f * SECTION_SCALE * 1.6f
-                val timerStackHeightDp = TIMER_BTN_BOX_DP * 2 + TIMER_BTN_GAP_DP
-                val alarmRowHeight = maxOf(alarmTextLineDp.dp, timerStackHeightDp.dp)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = GlanceModifier.fillMaxWidth().height(alarmRowHeight)
-                ) {
-                    // Dim the countdown once passed to signal it's done (now ticking overtime negative).
-                    val timerColor = if (timerPassed) GlanceTheme.colors.onSurfaceVariant else GlanceTheme.colors.onSurface
-                    // Convert the wall-clock finish into a Chronometer elapsedRealtime base so it ticks
-                    // on its own in the launcher (no app refresh needed).
-                    val base = SystemClock.elapsedRealtime() + (timerFinishMs - nowMs)
-                    AndroidRemoteViews(
-                        remoteViews = alarmLineRemoteViews(
-                            context = context,
-                            alarmText = nextAlarm,
-                            alarmColorArgb = GlanceTheme.colors.onSurfaceVariant.getColor(context).toArgb(),
-                            textSizeSp = 15f * SECTION_SCALE,
-                            showTimer = hasTimer,
-                            timerBaseElapsedRealtime = base,
-                            timerColorArgb = timerColor.getColor(context).toArgb()
-                        ),
-                        modifier = GlanceModifier.wrapContentWidth().fillMaxHeight()
-                    )
-                    if (timerPassed) {
-                        Spacer(modifier = GlanceModifier.width(6.dp))
-                        // Stack the controls vertically (refresh above X) so they take one narrow
-                        // column instead of a wide pair, keeping the whole alarm line on one row.
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (timerTotalMs > 0L) {
-                                TimerControlButton(
-                                    iconRes = R.drawable.ic_refresh,
-                                    description = "Restart timer",
-                                    onClick = actionRunCallback<RestartTimerAction>()
-                                )
-                                Spacer(modifier = GlanceModifier.height(TIMER_BTN_GAP_DP.dp))
-                            }
-                            TimerControlButton(
-                                iconRes = R.drawable.ic_close,
-                                description = "Dismiss timer",
-                                onClick = actionRunCallback<TimerDismissAction>()
-                            )
-                        }
+        // Alarm + system timer on ONE native line so the alarm label and the self-ticking
+        // countdown share a single baseline (see alarmLineRemoteViews). The row height is
+        // pinned and the native line fills it (fillMaxHeight), which both stops the embedded
+        // RemoteViews collapsing to ~0 height inside the Row and keeps the countdown's
+        // vertical position fixed when the restart/dismiss controls appear at expiry.
+        val nowMs = System.currentTimeMillis()
+        val hasTimer = timerFinishMs > 0L
+        val timerPassed = hasTimer && timerFinishMs <= nowMs
+        // The restart/dismiss controls stack vertically (refresh over X) so the pair stays
+        // narrow and fits beside the alarm+countdown on one line. The row must be tall enough
+        // for that two-button stack, so size it to the larger of the text line and the stack.
+        val alarmTextLineDp = 15f * SECTION_SCALE * 1.6f
+        val timerStackHeightDp = TIMER_BTN_BOX_DP * 2 + TIMER_BTN_GAP_DP
+        val alarmRowHeight = maxOf(alarmTextLineDp.dp, timerStackHeightDp.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            // Alarm carries the normal left inset; the events row below deliberately does NOT (its ‹
+            // arrow fills that inset), so the alarm text and the event title still line up flush-left.
+            modifier = GlanceModifier.fillMaxWidth().padding(start = contentInset).height(alarmRowHeight)
+        ) {
+            // Dim the countdown once passed to signal it's done (now ticking overtime negative).
+            val timerColor = if (timerPassed) GlanceTheme.colors.onSurfaceVariant else GlanceTheme.colors.onSurface
+            // Convert the wall-clock finish into a Chronometer elapsedRealtime base so it ticks
+            // on its own in the launcher (no app refresh needed).
+            val base = SystemClock.elapsedRealtime() + (timerFinishMs - nowMs)
+            AndroidRemoteViews(
+                remoteViews = alarmLineRemoteViews(
+                    context = context,
+                    alarmText = nextAlarm,
+                    alarmColorArgb = GlanceTheme.colors.onSurfaceVariant.getColor(context).toArgb(),
+                    textSizeSp = 15f * SECTION_SCALE,
+                    showTimer = hasTimer,
+                    timerBaseElapsedRealtime = base,
+                    timerColorArgb = timerColor.getColor(context).toArgb()
+                ),
+                modifier = GlanceModifier.wrapContentWidth().fillMaxHeight()
+            )
+            if (timerPassed) {
+                Spacer(modifier = GlanceModifier.width(6.dp))
+                // Stack the controls vertically (refresh above X) so they take one narrow
+                // column instead of a wide pair, keeping the whole alarm line on one row.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (timerTotalMs > 0L) {
+                        TimerControlButton(
+                            iconRes = R.drawable.ic_refresh,
+                            description = "Restart timer",
+                            onClick = actionRunCallback<RestartTimerAction>()
+                        )
+                        Spacer(modifier = GlanceModifier.height(TIMER_BTN_GAP_DP.dp))
                     }
+                    TimerControlButton(
+                        iconRes = R.drawable.ic_close,
+                        description = "Dismiss timer",
+                        onClick = actionRunCallback<TimerDismissAction>()
+                    )
                 }
-
-                Spacer(modifier = GlanceModifier.height(6.dp))
-
-                // Events Section: a self-cycling ViewFlipper of upcoming Proton events; tapping a
-                // frame opens that event in Proton.
-                EventsFlipper(events, eventsIndex, localTimeZone)
             }
+        }
 
-        }
-        }
+        Spacer(modifier = GlanceModifier.height(6.dp))
+
+        // Events Section: a self-cycling ViewFlipper of upcoming Proton events; tapping a
+        // frame opens that event in Proton.
+        EventsFlipper(events, eventsIndex, localTimeZone)
     }
 
     @Composable

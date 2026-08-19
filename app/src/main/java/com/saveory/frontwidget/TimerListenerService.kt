@@ -44,7 +44,11 @@ class TimerListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) = refresh()
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) = refresh()
+    // Pass the removed notification's key so the rescan ignores it: on some OEMs (incl. this Sony
+    // build) getActiveNotifications() can still momentarily include the notification that was just
+    // removed, which made a stopped timer look like it was still running - so the widget never
+    // cleared. Excluding it makes "stop the timer outside the widget" reliably hide it.
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) = refresh(sbn?.key)
 
     /**
      * Recompute the timer phase from the current notifications and publish it. Three phases:
@@ -54,15 +58,15 @@ class TimerListenerService : NotificationListenerService() {
      *             Only entered if we were already tracking a timer, so a firing *alarm* won't trigger it.
      *  - none:    no timer at all.
      */
-    private fun refresh() {
+    private fun refresh(removedKey: String? = null) {
         val now = System.currentTimeMillis()
         val running = try {
-            activeTimerFinishMs()
+            activeTimerFinishMs(removedKey)
         } catch (e: Exception) {
             Log.w(TAG, "timer scan failed", e); 0L
         }
         val firing = try {
-            hasFiringTimerNotif()
+            hasFiringTimerNotif(removedKey)
         } catch (e: Exception) {
             Log.w(TAG, "firing scan failed", e); false
         }
@@ -74,16 +78,20 @@ class TimerListenerService : NotificationListenerService() {
         val dismissed = prefs.getBoolean(KEY_TIMER_DISMISSED, false)
         val hadTimer = prevPhase != PHASE_NONE || prevFinish > 0L
 
-        // The Clock app's "Firing" notification is short-lived on some devices, so expiry is detected
-        // from the known finish instead: when the running countdown disappears at/near its finish it
-        // expired; if it vanished well before, it was cancelled. The ended state then persists until
-        // the user dismisses it (X) or a new timer starts.
+        // The ended ("expired") state is shown ONLY while the Clock is still firing the timer, plus a
+        // brief grace window right as a running countdown crosses its finish (to bridge the instant
+        // before the firing notification appears, and cover very short-lived firing notifs). Crucially
+        // it is NOT sticky: the moment the timer is stopped/dismissed OUTSIDE the widget - which
+        // removes Clock's notification - we fall through to NONE and the widget stops showing it,
+        // matching the phone. (Stopping a running countdown early likewise removes its notification ->
+        // running==0 and not firing -> NONE.) A previously-sticky EXPIRED phase kept the ended row on
+        // screen forever after an external stop, which is the reported "timer won't disappear" bug.
         val phase = when {
             running > 0 -> PHASE_ACTIVE
-            dismissed -> PHASE_NONE
-            prevPhase == PHASE_EXPIRED -> PHASE_EXPIRED
-            prevPhase == PHASE_ACTIVE && prevFinish > 0L && prevFinish - now <= END_GRACE_MS -> PHASE_EXPIRED
+            // User cleared it on the widget (X): stay hidden while Clock is still ringing it.
+            dismissed && firing -> PHASE_NONE
             firing && hadTimer -> PHASE_EXPIRED
+            prevPhase == PHASE_ACTIVE && prevFinish > 0L && prevFinish - now <= END_GRACE_MS -> PHASE_EXPIRED
             else -> PHASE_NONE
         }
 
@@ -107,6 +115,9 @@ class TimerListenerService : NotificationListenerService() {
             else -> {
                 finish = 0L
                 total = 0L
+                // Timer is truly gone (nothing firing): drop the dismiss latch so the next timer
+                // starts fresh instead of being suppressed by a stale flag.
+                if (!firing) newDismissed = false
             }
         }
 
@@ -168,20 +179,32 @@ class TimerListenerService : NotificationListenerService() {
         (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(expiryPendingIntent())
     }
 
-    /** True if Google Clock has a "Firing" notification up (an expired timer or alarm going off). */
-    private fun hasFiringTimerNotif(): Boolean {
+    /** True if Google Clock has a "Firing" notification up (an expired timer or alarm going off).
+     *  [excludeKey] is the key of a just-removed notification to ignore (see onNotificationRemoved). */
+    private fun hasFiringTimerNotif(excludeKey: String?): Boolean {
         val active = activeNotifications ?: return false
-        return active.any { it.packageName == CLOCK_PKG && it.notification?.channelId == FIRING_CHANNEL }
+        return active.any {
+            it.packageName == CLOCK_PKG &&
+                it.key != excludeKey &&
+                it.notification?.channelId == FIRING_CHANNEL
+        }
     }
 
-    /** The SOONEST future finish among running Clock timers (0 if none) - that's the one about to fire. */
-    private fun activeTimerFinishMs(): Long {
+    /** The SOONEST future finish among running Clock timers (0 if none) - that's the one about to fire.
+     *  [excludeKey] is the key of a just-removed notification to ignore (see onNotificationRemoved). */
+    private fun activeTimerFinishMs(excludeKey: String?): Long {
         val active = activeNotifications ?: return 0L
         val now = System.currentTimeMillis()
         var soonest = Long.MAX_VALUE
         for (sbn in active) {
             if (sbn.packageName != CLOCK_PKG) continue
-            val finish = timerFinish(sbn.notification ?: continue) ?: continue
+            if (sbn.key == excludeKey) continue
+            val n = sbn.notification ?: continue
+            // Skip the group summary: it carries no real countdown (its custom view is null) but can
+            // linger after the child timers are gone and, on some builds, expose a stale time string
+            // that would be misread as a still-running timer.
+            if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) continue
+            val finish = timerFinish(n) ?: continue
             if (finish > now && finish < soonest) soonest = finish
         }
         return if (soonest == Long.MAX_VALUE) 0L else soonest

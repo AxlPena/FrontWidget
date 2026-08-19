@@ -110,6 +110,20 @@
             </intent-filter>
         </receiver>
 
+        <!-- Real-time refresh of the alarm line (and timezone-formatted text). These implicit
+             broadcasts are exempt from the API 26+ manifest-receiver restriction, so a static
+             registration reliably wakes us to re-read the next alarm as soon as it changes. -->
+        <receiver
+            android:name=".SystemChangeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".TimerListenerService"
             android:label="FrontWidget Timer"

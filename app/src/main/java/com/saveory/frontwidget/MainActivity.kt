@@ -380,8 +380,9 @@ class MainActivity : ComponentActivity() {
 }
 
 // FrontWidget is GPLv3 (it links the GPLv3 Proton Core SDK). GPLv3 requires offering the complete
-// corresponding source; point this at the public repository. Replace the handles with the real ones.
-private const val SOURCE_URL = "https://github.com/saveory/FrontWidget"
+// corresponding source, so this must point at the PUBLIC repository. NOTE: the repo must be public
+// for this link to resolve for end users (a private repo returns GitHub's 404 page).
+private const val SOURCE_URL = "https://github.com/AxlPena/FrontWidget"
 private const val DONATION_URL = "https://buymeacoffee.com/alxcodes"
 
 /**
@@ -488,6 +489,10 @@ private fun LandingScaffold(
                 granted = notificationAccessGranted,
                 onEnable = onEnableNotificationAccess
             )
+
+            // How to use & feature overview: onboarding for new users, collapsed by default.
+            Spacer(Modifier.height(28.dp))
+            HowToUseSection()
 
             // About: donation, source, and open-source attribution (GPLv3 obligations).
             Spacer(Modifier.height(28.dp))
@@ -719,6 +724,99 @@ private const val OSS_ATTRIBUTION =
     "• kotlinx (Coroutines, Serialization) — Apache-2.0\n" +
     "• Timber — Apache-2.0\n" +
     "• Google Play Services Location — proprietary (Google APIs Terms of Service)"
+
+private val FEATURE_LINES = listOf(
+    "Clock & date, always up to date",
+    "Local weather (OpenWeather or Open-Meteo)",
+    "Proton Calendar events with ‹ › navigation",
+    "Next alarm — updates the moment it changes",
+    "Live system-timer countdown on the widget",
+    "Adjustable background, opacity & resizable layout"
+)
+
+private val HOW_TO_STEPS = listOf(
+    "Add it: long-press the home screen → Widgets → At a Glance, then drop it in place.",
+    "Optional: tap Connect Proton Calendar to show your events.",
+    "Pick a weather source and allow location for local conditions.",
+    "Enable Notification access to show running timers.",
+    "Tap a section to open Clock or Calendar; use ‹ › to browse events.",
+    "Resize by long-pressing the widget and dragging the handles."
+)
+
+@Composable
+private fun HowToUseSection() {
+    var expanded by remember { mutableStateOf(false) }
+
+    Text(
+        text = "How to use",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 13.sp
+    )
+    Spacer(Modifier.height(6.dp))
+
+    AboutRow(
+        title = "How to use & features",
+        subtitle = if (expanded) "Tap to hide" else "Tap to view a quick guide",
+        onClick = { expanded = !expanded }
+    )
+
+    if (expanded) {
+        Spacer(Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(14.dp)
+        ) {
+            Text(
+                text = "Features",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            FEATURE_LINES.forEach { line ->
+                Row(modifier = Modifier.padding(vertical = 3.dp)) {
+                    Text(
+                        text = "•  ",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = line,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "Getting started",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            HOW_TO_STEPS.forEachIndexed { index, step ->
+                Row(modifier = Modifier.padding(vertical = 3.dp)) {
+                    Text(
+                        text = "${index + 1}.  ",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = step,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun AboutSection(onOpenUrl: (String) -> Unit) {
