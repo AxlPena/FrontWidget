@@ -14,6 +14,8 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.appwidget.updateAll
+import com.saveory.frontwidget.data.MonarchSessionStore
+import com.saveory.frontwidget.data.WeeklySpendRepository
 import com.saveory.frontwidget.proton.calendar.ProtonEventStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +70,34 @@ class OpenMapsAction : ActionCallback {
         parameters: ActionParameters
     ) {
         context.startActivity(WidgetIntents.maps(context))
+    }
+}
+
+/**
+ * Tapping the weekly-spend ring either signs in or syncs, depending on session state:
+ *  - No stored Monarch session, or the last sync reported auth_ok=false (expired/rejected) -> open
+ *    [MonarchLoginActivity]. Login can't happen in the background worker (OTP/CAPTCHA), so the tap
+ *    routes to the Activity that owns it.
+ *  - Otherwise -> an immediate expedited "Spent" sync (on top of the 15-minute poll), which fetches,
+ *    writes prefs, and forceRefreshes so the ring reflects the latest spend within a moment.
+ */
+class SyncSpendAction : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        val authOk = prefs.getBoolean(WeeklySpendRepository.KEY_AUTH_OK, true)
+        val hasSession = MonarchSessionStore.hasSession(context)
+        if (!hasSession || !authOk) {
+            context.startActivity(
+                Intent(context, MonarchLoginActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } else {
+            WeeklySpendWorker.syncNow(context)
+        }
     }
 }
 

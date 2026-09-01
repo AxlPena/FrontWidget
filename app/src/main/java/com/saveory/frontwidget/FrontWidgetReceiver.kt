@@ -17,6 +17,7 @@ class FrontWidgetReceiver : GlanceAppWidgetReceiver() {
         // Refresh weather + Proton events when the widget is (re)added, and start cycling.
         WeatherWorker.enqueue(context)
         EventsWorker.enqueue(context, force = true)
+        WeeklySpendWorker.enqueue(context, force = true)
         WidgetCycle.schedule(context)
     }
 

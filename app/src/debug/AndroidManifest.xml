@@ -5,7 +5,9 @@
      Living in src/debug/ means the manifest merger only adds them to debug builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application>
+    <!-- Debug-only: allow plaintext HTTP so a local Monarch bridge (e.g. http://10.0.2.2:PORT) can be
+         hit during development. Release builds keep the platform default (cleartext blocked). -->
+    <application android:usesCleartextTraffic="true">
 
         <!-- Dumps the persisted events (incl. eventId + title) to logcat tag "EventDump". -->
         <receiver
@@ -22,6 +24,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.saveory.frontwidget.action.TEST_LOCATION" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Pushes a weekly_spend result (spent/as_of/auth_ok/pending) into widget_prefs, like the sync. -->
+        <receiver
+            android:name=".DebugWeeklySpendReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.saveory.frontwidget.action.SET_WEEKLY_SPEND" />
             </intent-filter>
         </receiver>
 

@@ -3,8 +3,14 @@ package com.saveory.frontwidget
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.os.Build
+import android.text.format.DateUtils
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -41,6 +47,8 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.compose.ui.unit.DpSize
 import com.saveory.frontwidget.data.AlarmRepository
+import com.saveory.frontwidget.data.WeeklySpend
+import com.saveory.frontwidget.data.WeeklySpendRepository
 import com.saveory.frontwidget.data.TemperatureUnit
 import com.saveory.frontwidget.data.WeatherStatus
 import com.saveory.frontwidget.proton.calendar.ProtonEvent
@@ -61,6 +69,11 @@ class FrontWidget : GlanceAppWidget() {
         // value to scale all three up/down together.
         private const val SECTION_SCALE = 1.30f
 
+        // Per-frame pixel cap for the animated wavy-ring flipper. 8 frames at this size stay well
+        // under the RemoteViews bitmap budget (8 * 104^2 * 4 bytes ~= 0.35 MB); the ImageView upscales
+        // each capped frame to the ring's display size (52dp).
+        private const val FLIPPER_FRAME_MAX_PX = 104
+
         // Compact restart/dismiss controls: they stack vertically (refresh over X) next to the alarm
         // line, so each button box + glyph is small and a tiny gap separates them. Two boxes + gap is
         // the stack's height, used to size the alarm row so the pair never clips.
@@ -75,6 +88,11 @@ class FrontWidget : GlanceAppWidget() {
         const val KEY_BG_OPACITY = "bg_opacity"
         const val DEFAULT_BG_ENABLED = true
         const val DEFAULT_BG_OPACITY = 100
+
+        // Whether the weekly-spend (Monarch) tracker is shown on the widget at all. The settings
+        // screen exposes this as a show/hide toggle; off removes the ring from the face entirely.
+        const val KEY_SPEND_ENABLED = "spend_enabled"
+        const val DEFAULT_SPEND_ENABLED = true
 
         // Which app calendar/event taps open. "device" = the device's default calendar app (honoring
         // the user's chosen default, e.g. Google/Samsung Calendar); "proton" = the Proton Calendar
@@ -196,6 +214,7 @@ class FrontWidget : GlanceAppWidget() {
             // Container background prefs (read here so a settings change + forceRefresh recomposes).
             val bgEnabled = prefs.getBoolean(KEY_BG_ENABLED, DEFAULT_BG_ENABLED)
             val bgOpacity = prefs.getInt(KEY_BG_OPACITY, DEFAULT_BG_OPACITY)
+            val spendEnabled = prefs.getBoolean(KEY_SPEND_ENABLED, DEFAULT_SPEND_ENABLED)
 
             // Weather + location read HERE (not the prelude) so a WeatherWorker refresh — or a manual
             // location change — reflects on the next recompose, instead of being frozen at the value
@@ -224,8 +243,13 @@ class FrontWidget : GlanceAppWidget() {
                 prefs.getString("location_tz_id", "") ?: "",
                 prefs.getInt("location_tz_offset", Int.MIN_VALUE)
             )
+            // Read the weekly spend HERE (like weather/events) and pass it down as a parameter, so a
+            // sync that rewrites the prefs + forceRefreshes actually recomposes the tracker. If it
+            // were read inside the composable with only the (unchanging) contentInset as input,
+            // Compose would skip re-rendering it and the face would freeze on the first value.
+            val weeklySpend = WeeklySpendRepository(context).getThisWeek()
             GlanceTheme {
-                WidgetContent(protonEvents, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, weatherTemp, weatherCond, weatherLocality, weatherRegion, weatherCountry, weatherStatus, weatherIsDay, locationTzId, size, bgEnabled, bgOpacity)
+                WidgetContent(protonEvents, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, weatherTemp, weatherCond, weatherLocality, weatherRegion, weatherCountry, weatherStatus, weatherIsDay, locationTzId, size, bgEnabled, bgOpacity, weeklySpend, spendEnabled)
             }
         }
     }
@@ -294,6 +318,9 @@ class FrontWidget : GlanceAppWidget() {
         setTextViewTextSize(R.id.alarm_text, TypedValue.COMPLEX_UNIT_SP, textSizeSp)
         setOnClickPendingIntent(R.id.alarm_text, alarmPendingIntent(context))
         if (showTimer) {
+            // A live countdown already carries its own hourglass; hide the standalone shortcut so
+            // the row never shows two hourglasses at once.
+            setViewVisibility(R.id.timer_launch_icon, View.GONE)
             setViewVisibility(R.id.timer_group, View.VISIBLE)
             setInt(R.id.timer_icon, "setColorFilter", timerColorArgb)
             setChronometerCountDown(R.id.timer_chrono, true)
@@ -304,6 +331,11 @@ class FrontWidget : GlanceAppWidget() {
             setOnClickPendingIntent(R.id.timer_group, timerPendingIntent(context))
         } else {
             setViewVisibility(R.id.timer_group, View.GONE)
+            // No live timer: show the standalone hourglass, tinted to match the alarm label, as a
+            // one-tap shortcut into the Clock app's Timers tab.
+            setViewVisibility(R.id.timer_launch_icon, View.VISIBLE)
+            setInt(R.id.timer_launch_icon, "setColorFilter", alarmColorArgb)
+            setOnClickPendingIntent(R.id.timer_launch_icon, timerPendingIntent(context))
         }
     }
 
@@ -534,7 +566,9 @@ class FrontWidget : GlanceAppWidget() {
         locationTzId: String,
         size: DpSize,
         bgEnabled: Boolean,
-        bgOpacity: Int
+        bgOpacity: Int,
+        weeklySpend: WeeklySpend,
+        spendEnabled: Boolean
     ) {
         val context = LocalContext.current
 
@@ -614,8 +648,10 @@ class FrontWidget : GlanceAppWidget() {
                             modifier = GlanceModifier.defaultWeight(),
                             horizontalAlignment = Alignment.Start
                         ) {
+                            // Wide-short (MEDIUM): height is already tight, so no spend tracker here.
                             SecondarySections(
-                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset
+                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset,
+                                showSpendTracker = false, weeklySpend = weeklySpend
                             )
                         }
                     }
@@ -635,7 +671,8 @@ class FrontWidget : GlanceAppWidget() {
                         )
                         if (!isSmall && isTall) {
                             SecondarySections(
-                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset
+                                events, eventsIndex, nextAlarm, timerFinishMs, timerTotalMs, localTimeZone, contentInset,
+                                showSpendTracker = spendEnabled, weeklySpend = weeklySpend
                             )
                         }
                     }
@@ -706,7 +743,9 @@ class FrontWidget : GlanceAppWidget() {
         timerFinishMs: Long,
         timerTotalMs: Long,
         localTimeZone: TimeZone,
-        contentInset: Dp
+        contentInset: Dp,
+        showSpendTracker: Boolean,
+        weeklySpend: WeeklySpend
     ) {
         val context = LocalContext.current
         // Smaller than the gap below: the weather row above is icon-height, so its extra
@@ -777,6 +816,13 @@ class FrontWidget : GlanceAppWidget() {
         // Events Section: a self-cycling ViewFlipper of upcoming Proton events; tapping a
         // frame opens that event in Proton.
         EventsFlipper(events, eventsIndex, localTimeZone)
+
+        // Weekly spend tracker sits directly under events. Only shown when the layout has real
+        // vertical room (tall/portrait): the wide-short MEDIUM bucket is already height-constrained
+        // (see WidgetContent), so we skip it there rather than clip it.
+        if (showSpendTracker) {
+            WeeklySpendTracker(contentInset, weeklySpend)
+        }
     }
 
     @Composable
@@ -891,6 +937,260 @@ class FrontWidget : GlanceAppWidget() {
                 Spacer(modifier = GlanceModifier.defaultWeight())
             }
         }
+    }
+
+    /**
+     * The weekly Groceries + Fun spend tracker rendered under the events flipper. Read-only first
+     * step: the spendable LIMIT is computed on-device from the plan overlay (see
+     * [WeeklySpendRepository]); SPENT is whatever a later Monarch sync has written to prefs.
+     *
+     * The face is deliberately minimal - a wavy M3-style progress ring whose centre shows the cash
+     * left this week, plus a one-word sync state - so a glance answers "how much can I still spend?".
+     *
+     * Accessibility (per Android's a11y + Material 3 guidance):
+     * - The ring carries one spoken [contentDescription] ("$X left, synced N min ago" or "Over
+     *   budget, no cash left"), so the over state never rides on the red ring colour alone.
+     * - Colours come from [GlanceTheme] M3 roles (onSurface / surfaceVariant / primary / error), so
+     *   contrast holds on any wallpaper and the ring follows the user's dynamic theme.
+     * - Type/ring scale with the shared SECTION_SCALE, tracking the user's density/text-size choice.
+     */
+    @Composable
+    private fun WeeklySpendTracker(contentInset: Dp, spend: WeeklySpend) {
+        val context = LocalContext.current
+
+        // Fraction of the weekly limit already spent, clamped to [0,1]. With no budget (Nov/Dec)
+        // any spend fills the ring so the over state still reads at a glance.
+        val fraction = when {
+            spend.limitCents > 0L -> (spend.spentCents.toFloat() / spend.limitCents).coerceIn(0f, 1f)
+            spend.spentCents > 0L -> 1f
+            else -> 0f
+        }
+
+        val onSurfaceVariant = GlanceTheme.colors.onSurfaceVariant
+        val onSurface = GlanceTheme.colors.onSurface
+        // The ring outline (track) is drawn in the widget background colour so it reads as a subtle
+        // groove in the surface rather than a contrasting band; only the wavy indicator stands out.
+        val trackArgb = GlanceTheme.colors.widgetBackground.getColor(context).toArgb()
+        val indicatorArgb =
+            (if (spend.over) GlanceTheme.colors.error else GlanceTheme.colors.primary)
+                .getColor(context).toArgb()
+        val amountSp = (16f * SECTION_SCALE).sp
+        val captionSp = (10f * SECTION_SCALE).sp
+
+        // Only two things on the face: cash left and the sync/auth state. They stack beside the
+        // ring (amount over state), mirroring the NYC time-over-label block. auth_ok=false means no
+        // Monarch session, so the number can't be trusted - say "Sign in" rather than a stale figure.
+        val cashLeft = formatDollars(spend.remainingCents)
+        val synced = spend.authOk && spend.asOfMs > 0L
+        val syncText = when {
+            !spend.authOk -> "Sign in"
+            synced -> "Synced"
+            else -> "Not synced"
+        }
+
+        // Smaller ring now that the numbers live beside it, not inside it (empty centre label).
+        val ringDp = 40f * SECTION_SCALE
+
+        val spoken = buildString {
+            append("Weekly groceries and fun. ")
+            append(if (spend.over) "Over budget, no cash left. " else "$cashLeft left. ")
+            append(
+                when {
+                    !spend.authOk -> "Not connected to Monarch, sign in."
+                    synced -> "Synced " + DateUtils.getRelativeTimeSpanString(
+                        spend.asOfMs, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
+                    )
+                    else -> "Not synced"
+                }
+            )
+        }
+
+        Spacer(modifier = GlanceModifier.height(8.dp))
+        Row(
+            modifier = GlanceModifier.fillMaxWidth().padding(start = contentInset),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Animated wavy ring: an auto-cycling 8-frame ViewFlipper (the only reliable way to
+            // animate inside RemoteViews) morphs the wave so the ring visibly moves. Each frame is
+            // rendered at a capped resolution and upscaled by its ImageView, so all 8 frames stay
+            // well under the RemoteViews bitmap budget - the ring moves without the blank-widget
+            // regression that full-density frames caused on strict OEM launchers.
+            // Tapping the ring forces an immediate Monarch spend sync (see SyncSpendAction),
+            // separate from the whole-widget "open app" tap. The clickable lives on a wrapping Box
+            // (a real container view) rather than on AndroidRemoteViews directly, because Glance
+            // does not reliably attach a click PendingIntent to an embedded RemoteViews subtree.
+            Box(
+                modifier = GlanceModifier.size(ringDp.dp).clickable(actionRunCallback<SyncSpendAction>())
+            ) {
+                AndroidRemoteViews(
+                    remoteViews = wavyFlipperRemoteViews(
+                        context = context,
+                        fraction = fraction,
+                        sizeDp = ringDp,
+                        strokeDp = 5f,
+                    trackArgb = trackArgb,
+                    indicatorArgb = indicatorArgb,
+                    spoken = spoken
+                    ),
+                    modifier = GlanceModifier.size(ringDp.dp)
+                )
+            }
+            Spacer(modifier = GlanceModifier.width(10.dp))
+            Column {
+                Text(
+                    text = cashLeft,
+                    style = TextStyle(fontSize = amountSp, fontWeight = FontWeight.Bold, color = onSurface)
+                )
+                Text(
+                    text = syncText,
+                    style = TextStyle(fontSize = captionSp, color = onSurfaceVariant)
+                )
+            }
+        }
+    }
+
+    /**
+     * Draws a determinate, Material-3-expressive WAVY progress ring (flat thin track + a sine-wave
+     * indicator arc with a centred label) to a Bitmap. Home-screen widgets are RemoteViews, so
+     * neither Compose's CircularWavyProgressIndicator nor the Material Views CircularProgressIndicator
+     * can run here; a Canvas-drawn bitmap shown via a Glance Image is the reliable way to get a
+     * determinate wavy radial indicator. Colours are passed in already resolved from GlanceTheme so
+     * the ring follows the M3 dynamic theme (and light/dark).
+     */
+    private fun radialProgressBitmap(
+        context: Context,
+        fraction: Float,
+        sizeDp: Float,
+        strokeDp: Float,
+        trackArgb: Int,
+        indicatorArgb: Int,
+        textArgb: Int,
+        centerText: String,
+        phaseDeg: Float = 0f,
+        maxSizePx: Int = Int.MAX_VALUE
+    ): Bitmap {
+        val density = context.resources.displayMetrics.density
+        // Cap the rendered pixel size (the animated flipper passes a cap) so N phase frames stay well
+        // within the RemoteViews bitmap budget that strict OEM launchers enforce; stroke/amplitude
+        // scale with it to preserve proportions, and the ImageView upscales the capped frame to the
+        // ring's display size. Unset (single static frame) renders at full display resolution.
+        val fullPx = sizeDp * density
+        val renderScale = if (fullPx > maxSizePx) maxSizePx / fullPx else 1f
+        val size = (fullPx * renderScale).toInt().coerceAtLeast(1)
+        val stroke = strokeDp * density * renderScale
+        // Wave swing (how far the radius oscillates). Clamp it so the wave can never exceed the
+        // circle: even at a peak the arc stays within the ring's radius (comfortably inside the
+        // diameter) and baseR stays positive.
+        val amplitude = (stroke * 1.05f).coerceAtMost(size / 2f - stroke)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val cx = size / 2f
+        val cy = size / 2f
+        // Leave room for both the stroke half-width and the wave's outward swing so it never clips.
+        val baseR = size / 2f - stroke / 2f - amplitude - 1f
+
+        // Flat, thin track behind everything (the "remaining" part of the ring).
+        val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = stroke * 0.6f
+            strokeCap = Paint.Cap.ROUND
+            color = trackArgb
+        }
+        canvas.drawCircle(cx, cy, baseR, trackPaint)
+
+        // Wavy active arc: the radius oscillates as a sine wave along the arc, sampled as a polyline
+        // in small angular steps and stroked with round caps/joins for the smooth M3 look.
+        val sweep = fraction.coerceIn(0f, 1f) * 360f
+        if (sweep > 0f) {
+            val waves = 9            // wave cycles around a full circle
+            val startDeg = -90f      // begin at 12 o'clock
+            val stepDeg = 2f
+            val path = Path()
+            var deg = 0f
+            var first = true
+            while (deg <= sweep) {
+                // phaseDeg shifts the wave along the arc; stepping it across flipper frames makes the
+                // wave appear to travel (one full period over a loop = a seamless morph).
+                val r = baseR + amplitude * Math.sin(Math.toRadians((deg * waves + phaseDeg).toDouble())).toFloat()
+                val rad = Math.toRadians((startDeg + deg).toDouble())
+                val x = cx + r * Math.cos(rad).toFloat()
+                val y = cy + r * Math.sin(rad).toFloat()
+                if (first) { path.moveTo(x, y); first = false } else path.lineTo(x, y)
+                deg += stepDeg
+            }
+            val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                // Thin moving line: draw the wavy indicator at ~55% of the base stroke so it reads as
+                // a slim line, not a heavy band, while the wave amplitude (from the full stroke) keeps
+                // the bumps pronounced.
+                strokeWidth = stroke * 0.55f
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                color = indicatorArgb
+            }
+            canvas.drawPath(path, indicatorPaint)
+        }
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = textArgb
+            textAlign = Paint.Align.CENTER
+            textSize = size * 0.26f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val ty = cy - (textPaint.descent() + textPaint.ascent()) / 2f
+        canvas.drawText(centerText, cx, ty, textPaint)
+
+        return bmp
+    }
+
+    /**
+     * Builds the auto-cycling wavy ring for the widget: one [radialProgressBitmap] per ViewFlipper
+     * frame, each with the wave phase advanced by 360/N so the loop shows exactly one wavelength of
+     * travel (seamless). The flipper (autoStart + short flipInterval, no transition) does the motion
+     * on the launcher's UI thread - the only reliable way to animate inside RemoteViews. The frame
+     * count is kept small (8) AND each frame is rendered at a capped resolution (FLIPPER_FRAME_MAX_PX)
+     * then upscaled by the ImageView, so all 8 frames together stay well under the RemoteViews bitmap
+     * budget some OEM launchers (e.g. Sony's XperiaLauncher) enforce - which previously blanked the
+     * widget when full-density frames pushed the payload past ~1 MB.
+     */
+    private fun wavyFlipperRemoteViews(
+        context: Context,
+        fraction: Float,
+        sizeDp: Float,
+        strokeDp: Float,
+        trackArgb: Int,
+        indicatorArgb: Int,
+        spoken: String
+    ): RemoteViews {
+        val frameIds = intArrayOf(
+            R.id.frame_0, R.id.frame_1, R.id.frame_2, R.id.frame_3,
+            R.id.frame_4, R.id.frame_5, R.id.frame_6, R.id.frame_7
+        )
+        val n = frameIds.size
+        return RemoteViews(context.packageName, R.layout.widget_wavy_flipper).apply {
+            for (i in 0 until n) {
+                val bmp = radialProgressBitmap(
+                    context = context,
+                    fraction = fraction,
+                    sizeDp = sizeDp,
+                    strokeDp = strokeDp,
+                    trackArgb = trackArgb,
+                    indicatorArgb = indicatorArgb,
+                    textArgb = indicatorArgb,
+                    centerText = "",
+                    phaseDeg = 360f * i / n,
+                    maxSizePx = FLIPPER_FRAME_MAX_PX
+                )
+                setImageViewBitmap(frameIds[i], bmp)
+            }
+            setContentDescription(R.id.wavy_flipper, spoken)
+        }
+    }
+
+    /** Compact whole-dollar currency for the widget face (e.g. 17566 cents -> "$176"). */
+    private fun formatDollars(cents: Long): String {
+        val dollars = Math.round(cents / 100.0)
+        return "$" + java.text.NumberFormat.getIntegerInstance(Locale.US).format(dollars)
     }
 
     @Composable

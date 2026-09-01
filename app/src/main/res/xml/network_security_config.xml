@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TLS certificate pinning for the hand-rolled Monarch HttpURLConnection client (MonarchApi.kt) and
+  the CAPTCHA WebView (MonarchLoginActivity). HttpURLConnection honours this config at the platform
+  layer (minSdk 26), so no client code change is required. Pins are SPKI (SHA-256, base64).
+
+  api.monarch.com / app.monarch.com are served by Google Trust Services (leaf issued by "WE1").
+  We pin the durable issuing intermediate (WE1) plus the GTS Root R4 backup rather than the
+  short-lived leaf, so routine leaf rotation does not brick the app. If Monarch ever migrates CAs,
+  recapture and bump the pins (and the expiration) — until then a MITM with a device-trusted CA is
+  rejected during the TLS handshake.
+
+  Recapture:
+    Google WE1 intermediate : http://i.pki.goog/we1.crt
+    GTS Root R4             : http://i.pki.goog/r4.crt
+    pin = openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
+          | openssl dgst -sha256 -binary | openssl enc -base64
+-->
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">monarch.com</domain>
+        <pin-set expiration="2027-06-01">
+            <!-- Google Trust Services "WE1" issuing intermediate (primary). -->
+            <pin digest="SHA-256">kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=</pin>
+            <!-- GTS Root R4 (backup, survives intermediate rotation). -->
+            <pin digest="SHA-256">mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=</pin>
+        </pin-set>
+    </domain-config>
+</network-security-config>

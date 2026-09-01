@@ -28,13 +28,24 @@ android {
         applicationId "com.saveory.frontwidget"
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName "1.0.4"
+        versionCode 6
+        versionName "1.1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
         }
+
+        // OpenWeather key is no longer hardcoded in source. It comes from a git-ignored
+        // local.properties entry (OPEN_WEATHER_API_KEY=...) or the OPEN_WEATHER_API_KEY env var;
+        // it is empty in a fresh clone / CI without the secret.
+        def owProps = new Properties()
+        def owPropsFile = rootProject.file("local.properties")
+        if (owPropsFile.exists()) { owPropsFile.withInputStream { owProps.load(it) } }
+        def owKey = (owProps['OPEN_WEATHER_API_KEY']
+                ?: project.findProperty("OPEN_WEATHER_API_KEY")
+                ?: System.getenv("OPEN_WEATHER_API_KEY") ?: "")
+        buildConfigField "String", "OPEN_WEATHER_API_KEY", "\"${owKey}\""
     }
 
     signingConfigs {
@@ -108,6 +119,10 @@ dependencies {
 
     // WorkManager
     implementation "androidx.work:work-runtime-ktx:2.9.0"
+
+    // Encrypted storage for the on-device Monarch session (token + device-uuid, or cookies).
+    // Independent of the Kotlin/Compose/Hilt toolchain, so it does not touch the Proton stack.
+    implementation "androidx.security:security-crypto:1.1.0-alpha06"
 
     // Play Services - Fused Location Provider
     implementation "com.google.android.gms:play-services-location:21.3.0"

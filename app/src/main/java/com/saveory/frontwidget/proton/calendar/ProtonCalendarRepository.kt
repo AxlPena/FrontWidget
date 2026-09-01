@@ -59,6 +59,11 @@ class ProtonCalendarRepository(
         const val MIN_WINDOW_SPAN_SEC = 7L * 24 * 3600
         // Safety cap on recurrence iterations so a malformed/unbounded rule can't spin forever.
         const val MAX_OCCURRENCE_ITERATIONS = 5000
+        // Clamp RRULE INTERVAL so iteration*interval math can't overflow Int (worst case
+        // MAX_OCCURRENCE_ITERATIONS * MAX_INTERVAL * 7 stays well within Int range).
+        const val MAX_INTERVAL = 1000
+        // Cap BYDAY/BYMONTHDAY token counts so a giant list can't multiply per-iteration work.
+        const val MAX_BYPARTS = 366
     }
 
     /** A decrypted master/override event with the recurrence metadata needed to expand it. */
@@ -520,11 +525,14 @@ class ProtonCalendarRepository(
         }.toMap()
         val freq = parts["FREQ"]?.uppercase() ?: return null
         if (freq !in setOf("DAILY", "WEEKLY", "MONTHLY", "YEARLY")) return null
-        val interval = parts["INTERVAL"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        // coerceIn (not just coerceAtLeast): an attacker-supplied INTERVAL like 2_000_000_000 would
+        // otherwise overflow Int in `iteration * interval` and defeat the window early-exit.
+        val interval = parts["INTERVAL"]?.toIntOrNull()?.coerceIn(1, MAX_INTERVAL) ?: 1
         val count = parts["COUNT"]?.toIntOrNull()
         val untilSec = parts["UNTIL"]?.let { parseIcsDateToSec(it, tzId) }
-        val byDay = parts["BYDAY"]?.split(',')?.mapNotNull { parseByDay(it) } ?: emptyList()
-        val byMonthDay = parts["BYMONTHDAY"]?.split(',')?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
+        val byDay = parts["BYDAY"]?.split(',')?.take(MAX_BYPARTS)?.mapNotNull { parseByDay(it) } ?: emptyList()
+        val byMonthDay = parts["BYMONTHDAY"]?.split(',')?.take(MAX_BYPARTS)
+            ?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
         return Recurrence(freq, interval, count, untilSec, byDay, byMonthDay)
     }
 

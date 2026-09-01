@@ -22,17 +22,32 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -46,9 +61,11 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,9 +74,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import com.saveory.frontwidget.data.MonarchSessionStore
+import com.saveory.frontwidget.data.WeeklySpend
+import com.saveory.frontwidget.data.WeeklySpendRepository
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -67,13 +91,18 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.appwidget.updateAll
 import com.saveory.frontwidget.data.WeatherProviders
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import me.proton.core.account.domain.entity.isReady
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.accountmanager.presentation.observe
@@ -123,6 +152,12 @@ class MainActivity : ComponentActivity() {
     // Which app calendar/event taps open: device default vs the Proton Calendar integration.
     private var calendarTarget by mutableStateOf(FrontWidget.DEFAULT_CALENDAR_TARGET)
 
+    // Weekly-spend (Monarch) section: whether it's shown at all (widget + this screen), and whether
+    // a Monarch session is currently stored (drives Connect vs Disconnect). Re-read in onResume so
+    // returning from the login screen flips the UI to "connected".
+    private var spendEnabled by mutableStateOf(FrontWidget.DEFAULT_SPEND_ENABLED)
+    private var monarchConnected by mutableStateOf(false)
+
     // Whether the user has granted Notification access, which the timer feature needs to read the
     // Clock app's running-countdown notification. Re-read in onResume so the UI flips to "enabled"
     // the moment the user returns from the system settings screen after granting it.
@@ -155,7 +190,9 @@ class MainActivity : ComponentActivity() {
             backgroundOpacity = p.getInt(FrontWidget.KEY_BG_OPACITY, FrontWidget.DEFAULT_BG_OPACITY)
             calendarTarget = p.getString(FrontWidget.KEY_CALENDAR_TARGET, FrontWidget.DEFAULT_CALENDAR_TARGET)
                 ?: FrontWidget.DEFAULT_CALENDAR_TARGET
+            spendEnabled = p.getBoolean(FrontWidget.KEY_SPEND_ENABLED, FrontWidget.DEFAULT_SPEND_ENABLED)
         }
+        monarchConnected = MonarchSessionStore.hasSession(this)
 
         // Debug hook to A/B the region reveal styles: `am start ... --es reveal_mode flip|ticker|ellipsis`.
         intent?.getStringExtra("reveal_mode")?.let { mode ->
@@ -232,6 +269,11 @@ class MainActivity : ComponentActivity() {
                     onBackgroundOpacityCommit = ::commitBackgroundOpacity,
                     calendarTarget = calendarTarget,
                     onCalendarTargetSelected = ::chooseCalendarTarget,
+                    spendEnabled = spendEnabled,
+                    onSpendEnabledChange = ::applySpendEnabled,
+                    monarchConnected = monarchConnected,
+                    onConnectMonarch = ::connectMonarch,
+                    onDisconnectMonarch = ::disconnectMonarch,
                     notificationAccessGranted = notificationAccessGranted,
                     onEnableNotificationAccess = ::openNotificationAccess,
                     onOpenUrl = ::openUrl
@@ -244,6 +286,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // The user may have just toggled Notification access in system settings; reflect it.
         notificationAccessGranted = isNotificationAccessGranted()
+        // Returning from the Monarch login screen: reflect the new session state.
+        monarchConnected = MonarchSessionStore.hasSession(this)
+        // Ensure the 15-minute weekly-spend poll is scheduled and refresh spend now that we're open.
+        WeeklySpendWorker.enqueue(this, force = true)
     }
 
     /** True if this app is currently allowed to read notifications (needed for the Clock timer). */
@@ -312,6 +358,32 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { FrontWidget.forceRefresh(applicationContext) }
     }
 
+    /** Show/hide the weekly-spend tracker on the widget (and the section here) and re-render. */
+    private fun applySpendEnabled(enabled: Boolean) {
+        spendEnabled = enabled
+        getSharedPreferences("widget_prefs", MODE_PRIVATE)
+            .edit()
+            .putBoolean(FrontWidget.KEY_SPEND_ENABLED, enabled)
+            .apply()
+        refreshWidgetContainer()
+    }
+
+    /** Open the native Monarch sign-in screen (email/password -> token, OTP/CAPTCHA as needed). */
+    private fun connectMonarch() {
+        startActivity(Intent(this, MonarchLoginActivity::class.java))
+    }
+
+    /** Forget the stored Monarch session; the widget falls back to its "Sign in" state. */
+    private fun disconnectMonarch() {
+        MonarchSessionStore.clear(this)
+        getSharedPreferences("widget_prefs", MODE_PRIVATE)
+            .edit()
+            .putBoolean(WeeklySpendRepository.KEY_AUTH_OK, false)
+            .apply()
+        monarchConnected = false
+        refreshWidgetContainer()
+    }
+
     /** Open an external link (donation/source) in the device's default browser. */
     private fun openUrl(url: String) {
         try {
@@ -371,6 +443,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshWidget() {
         WeatherWorker.enqueue(this, force = true)
         EventsWorker.enqueue(this, force = true)
+        WeeklySpendWorker.enqueue(this, force = true)
         lifecycleScope.launch { FrontWidget().updateAll(applicationContext) }
     }
 
@@ -391,7 +464,7 @@ private const val DONATION_URL = "https://buymeacoffee.com/alxcodes"
  * older devices. Light/dark is driven by the system setting via [isSystemInDarkTheme].
  */
 @Composable
-private fun FrontWidgetTheme(content: @Composable () -> Unit) {
+internal fun FrontWidgetTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
     val colorScheme = when {
@@ -420,6 +493,11 @@ private fun LandingScaffold(
     onBackgroundOpacityCommit: () -> Unit = {},
     calendarTarget: String = FrontWidget.DEFAULT_CALENDAR_TARGET,
     onCalendarTargetSelected: (String) -> Unit = {},
+    spendEnabled: Boolean = FrontWidget.DEFAULT_SPEND_ENABLED,
+    onSpendEnabledChange: (Boolean) -> Unit = {},
+    monarchConnected: Boolean = false,
+    onConnectMonarch: () -> Unit = {},
+    onDisconnectMonarch: () -> Unit = {},
     notificationAccessGranted: Boolean = false,
     onEnableNotificationAccess: () -> Unit = {},
     onOpenUrl: (String) -> Unit = {}
@@ -464,6 +542,18 @@ private fun LandingScaffold(
                     onWindowSelected = onWindowSelected
                 )
             }
+
+            // Weekly Groceries + Fun spend, shown with the animated Material 3 wavy ring (the widget
+            // face carries a static bitmap version; this in-app card is where the motion lives).
+            // The whole section can be hidden, and Monarch sign-in/out lives right here.
+            Spacer(Modifier.height(28.dp))
+            WeeklySpendSection(
+                enabled = spendEnabled,
+                onEnabledChange = onSpendEnabledChange,
+                monarchConnected = monarchConnected,
+                onConnect = onConnectMonarch,
+                onDisconnect = onDisconnectMonarch
+            )
 
             // Weather source is independent of Proton, so it's always adjustable.
             Spacer(Modifier.height(28.dp))
@@ -513,7 +603,7 @@ private fun LandingScaffold(
 }
 
 @Composable
-private fun BrandMark() {
+internal fun BrandMark() {
     // Captured before Canvas: the draw lambda runs in DrawScope, not a @Composable scope.
     val accent = MaterialTheme.colorScheme.primary
     Box(
@@ -549,6 +639,309 @@ private fun BrandMark() {
             drawLine(accent, Offset(size.width * 0.7f, size.height * 0.02f), Offset(size.width * 0.7f, ringY), strokeWidth = stroke)
             // A "day" dot.
             drawCircle(accent, radius = size.minDimension * 0.09f, center = Offset(size.width * 0.5f, size.height * 0.62f))
+        }
+    }
+}
+
+/**
+ * In-app weekly Groceries + Fun spend card with an animated, hand-drawn wavy progress ring.
+ *
+ * The ring is drawn with a plain Compose [Canvas] rather than Material 3's experimental
+ * CircularWavyProgressIndicator: that component only exists in the material3 1.5.0-alpha line, which
+ * drags in Compose 1.8 / Kotlin 2.1.20 — and that toolchain floor collides with Proton Core 34.3.0's
+ * precompiled Hilt 2.49 (@StringKey) ViewModels, breaking Proton sign-in. Drawing the ring ourselves
+ * keeps the stable Compose BOM (M3 1.2.1) so the Proton login graph stays intact.
+ *
+ * Motion: an infinite phase animation continuously morphs the sine wave (so the ring is always
+ * alive), while the determinate fill sweeps to the spent fraction via
+ * [ProgressIndicatorDefaults.ProgressAnimationSpec]. While unsynced we sweep a full morphing ring as
+ * an indeterminate state.
+ *
+ * Accessibility: the whole card is one spoken unit and the amount/status are real text (never
+ * colour-only); colours come from the M3 [MaterialTheme] scheme so contrast and dynamic colour hold.
+ */
+/**
+ * The weekly-spend section on the settings screen: a show/hide header toggle and, when on, the
+ * animated spend card plus a Monarch Connect/Disconnect control. Sign-in happens here (in the app)
+ * as well as via the widget ring — a ring has no room for OTP/CAPTCHA, so both routes open
+ * [MonarchLoginActivity].
+ */
+@Composable
+private fun WeeklySpendSection(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    monarchConnected: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = "Weekly spend",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = if (enabled) "Groceries + Fun tracker on the widget" else "Hidden from the widget",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange
+        )
+    }
+
+    if (enabled) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val repo = remember { WeeklySpendRepository(context) }
+        var spend by remember { mutableStateOf(repo.getThisWeek()) }
+
+        // Recompute the plan-derived recommendation (and spent) every time the screen resumes, so a
+        // week rollover or a plan/cap change is reflected without needing to reinstall or reopen.
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) spend = repo.getThisWeek()
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        WeeklySpendCard(
+            spend = spend,
+            onSave = { cents ->
+                repo.setWeeklyLimitOverrideCents(cents)
+                spend = repo.getThisWeek()
+                scope.launch { FrontWidget.forceRefresh(context) }
+            },
+            onReset = {
+                repo.clearWeeklyLimitOverride()
+                spend = repo.getThisWeek()
+                scope.launch { FrontWidget.forceRefresh(context) }
+            }
+        )
+        Spacer(Modifier.height(16.dp))
+        if (monarchConnected) {
+            OutlinedButton(
+                onClick = onDisconnect,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Disconnect Monarch", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Connected. Spend syncs every 15 minutes and when you tap the ring.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Button(
+                onClick = onConnect,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Connect Monarch", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Sign in with your Monarch account to track this week's spend.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeeklySpendCard(
+    spend: WeeklySpend,
+    onSave: (Long) -> Unit,
+    onReset: () -> Unit
+) {
+    val synced = spend.authOk && spend.asOfMs > 0L
+    val fraction = when {
+        spend.limitCents > 0L -> (spend.spentCents.toFloat() / spend.limitCents).coerceIn(0f, 1f)
+        spend.spentCents > 0L -> 1f
+        else -> 0f
+    }
+    fun money(cents: Long): String =
+        "$" + java.text.NumberFormat.getIntegerInstance(java.util.Locale.US)
+            .format(Math.round(cents / 100.0))
+    val cashLeft = money(spend.remainingCents)
+    val limitLabel = money(spend.limitCents)
+
+    // Inline limit editor (lives on the right of the ring). Re-seeds whenever the effective limit
+    // changes (e.g. after Save/Reset recompute).
+    var limitText by remember(spend.limitCents) { mutableStateOf((spend.limitCents / 100L).toString()) }
+    val enteredDollars = limitText.filter { it.isDigit() }.toLongOrNull()
+    val limitDirty = enteredDollars != null && enteredDollars != (spend.limitCents / 100L)
+
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    val indicator = if (spend.over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+
+    // Determinate fill animates smoothly to the target percentage (the classic M3 progress tween).
+    val animatedFraction by animateFloatAsState(
+        targetValue = if (synced) fraction else 0f,
+        animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
+        label = "spendFill"
+    )
+    val spoken = when {
+        synced -> "Weekly groceries and fun, $cashLeft left of $limitLabel."
+        !spend.authOk -> "Weekly groceries and fun, not connected to Monarch."
+        else -> "Weekly spend syncing."
+    }
+
+    // Continuous wave phase (radians) that never rests, so the ring keeps morphing like the M3
+    // expressive indicator would — regardless of the (static) fill fraction.
+    val waveTransition = rememberInfiniteTransition(label = "spendWave")
+    val phase by waveTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(durationMillis = 1600, easing = LinearEasing)),
+        label = "spendWavePhase"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(20.dp)
+                .clearAndSetSemantics { contentDescription = spoken },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+                // Hand-drawn wavy ring: a flat thin track plus a sine-wave indicator arc. Synced ->
+                // determinate sweep to the spent fraction; unsynced -> a full morphing ring.
+                val sweepFraction = if (synced) animatedFraction else 1f
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = 6.dp.toPx()
+                    val amplitude = stroke * 0.9f
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val baseR = size.minDimension / 2f - stroke / 2f - amplitude - 1f
+                    // Flat, thin "remaining" track behind the active arc.
+                    drawCircle(
+                        color = track,
+                        radius = baseR,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = stroke * 0.6f, cap = StrokeCap.Round)
+                    )
+                    if (sweepFraction > 0.001f) {
+                        val waves = 8
+                        val sweepDeg = sweepFraction * 360f
+                        val steps = (sweepDeg * 1.5f).toInt().coerceAtLeast(2)
+                        val path = Path()
+                        for (i in 0..steps) {
+                            val t = i.toFloat() / steps
+                            val angleRad = Math.toRadians((-90f + sweepDeg * t).toDouble())
+                            val r = baseR + amplitude * sin(waves * (2.0 * PI) * t + phase).toFloat()
+                            val x = cx + r * cos(angleRad).toFloat()
+                            val y = cy + r * sin(angleRad).toFloat()
+                            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = path,
+                            color = indicator,
+                            style = Stroke(width = stroke, cap = StrokeCap.Round)
+                        )
+                    }
+                }
+                Text(
+                    text = if (synced) cashLeft else "\u2026",
+                    color = onSurface,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "This week's limit",
+                    color = onSurfaceVariant,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(6.dp))
+                // The editor sits in the space to the right of the ring.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = limitText,
+                        onValueChange = { new -> limitText = new.filter { it.isDigit() }.take(6) },
+                        singleLine = true,
+                        prefix = { Text("$") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = { enteredDollars?.let { onSave(it * 100L) } },
+                        enabled = limitDirty,
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxHeight(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("Save", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = when {
+                            spend.over -> "Over budget · rec. ${money(spend.recommendedCents)}"
+                            synced -> "$cashLeft left · rec. ${money(spend.recommendedCents)}"
+                            !spend.authOk -> "Connect Monarch to sync"
+                            else -> "Recommended ${money(spend.recommendedCents)} from your plan"
+                        },
+                        color = if (spend.over) MaterialTheme.colorScheme.error else onSurfaceVariant,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (spend.overridden) {
+                        TextButton(
+                            onClick = onReset,
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("Reset", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
         }
     }
 }

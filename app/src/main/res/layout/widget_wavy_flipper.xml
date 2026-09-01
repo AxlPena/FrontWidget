@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Home-screen widgets are RemoteViews and cannot run Compose / Material 3 animations. To make the
+  wavy spend ring actually MOVE, we pre-render N frames (each with the wave shifted by one step) and
+  drop them into a ViewFlipper: it is a @RemoteView that, with autoStart + a short flipInterval and
+  no in/out transition, cycles its children on the launcher's UI thread - giving a looping, morphing
+  wave. Each frame's bitmap is set at runtime via setImageViewBitmap (see wavyFlipperRemoteViews).
+
+  The flipper and every frame fill the parent (match_parent) and the ImageViews use fitCenter, so the
+  resolution-capped frame bitmaps (see FLIPPER_FRAME_MAX_PX) are upscaled to the ring's display size.
+  Capping the bitmap keeps all N frames well under the RemoteViews bitmap budget that some OEM
+  launchers enforce, so the ring animates without blanking the widget.
+-->
+<ViewFlipper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wavy_flipper"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:autoStart="true"
+    android:flipInterval="100"
+    android:measureAllChildren="true">
+
+    <ImageView android:id="@+id/frame_0" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_1" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_2" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_3" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_4" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_5" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_6" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/frame_7" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="no" />
+</ViewFlipper>

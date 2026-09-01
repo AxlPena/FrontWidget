@@ -3,4 +3,6 @@
     <!-- Name shown under the widget in the launcher's widget picker. Change this to rename the widget. -->
     <string name="widget_label">At a Glance</string>
     <string name="widget_description">Clocks, weather, next alarm/timer, and upcoming events at a glance.</string>
+    <string name="open_timer">Open timer</string>
+    <string name="monarch_login_title">Connect Monarch</string>
 </resources>

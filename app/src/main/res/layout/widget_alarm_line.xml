@@ -18,6 +18,17 @@
         android:includeFontPadding="false"
         android:maxLines="1" />
 
+    <!-- Always-visible hourglass sitting just right of the alarm label: a one-tap shortcut into the
+         Clock app's Timers tab. Hidden while a live countdown is showing (timer_group carries its own
+         hourglass then), so the row never displays two hourglasses at once. -->
+    <ImageView
+        android:id="@+id/timer_launch_icon"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:layout_marginStart="8dp"
+        android:src="@drawable/ic_hourglass"
+        android:contentDescription="@string/open_timer" />
+
     <LinearLayout
         android:id="@+id/timer_group"
         android:layout_width="wrap_content"

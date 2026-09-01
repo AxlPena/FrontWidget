@@ -20,6 +20,7 @@ class BootReceiver : BroadcastReceiver() {
                 val appContext = context.applicationContext
                 WeatherWorker.enqueue(appContext, force = true)
                 EventsWorker.enqueue(appContext, force = true)
+                WeeklySpendWorker.enqueue(appContext, force = true)
                 WidgetCycle.schedule(appContext)
             }
         }
