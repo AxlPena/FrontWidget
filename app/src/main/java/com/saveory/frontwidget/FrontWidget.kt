@@ -598,19 +598,18 @@ class FrontWidget : GlanceAppWidget() {
         // Optional M3 themed widget surface (dynamic-color aware) at the system corner radius, with
         // user-controlled opacity. On: text keeps its onSurface contrast on ANY wallpaper (critical
         // on OLED where wallpapers are usually dark). Off: frameless (text straight on the wallpaper).
-        val containerModifier = if (bgEnabled) {
-            val bg = GlanceTheme.colors.widgetBackground.getColor(context)
-                .copy(alpha = bgOpacity.coerceIn(0, 100) / 100f)
-            GlanceModifier
-                .fillMaxSize()
-                .background(bg)
-                .cornerRadius(android.R.dimen.system_app_widget_background_radius)
-                .padding(top = contentInset, bottom = contentInset, end = contentInset)
-        } else {
-            GlanceModifier
-                .fillMaxSize()
-                .padding(top = contentInset, bottom = contentInset, end = contentInset)
-        }
+        // Always emit a background node and vary only its alpha (transparent when disabled). Omitting
+        // the .background() modifier when off leaves Glance's REUSED RemoteViews painted with the old
+        // opaque background until the widget is removed/re-added; painting transparent instead emits a
+        // real "clear" instruction, so a settings change (toggle or opacity) reliably repaints on the
+        // next forceRefresh.
+        val bgAlpha = if (bgEnabled) bgOpacity.coerceIn(0, 100) / 100f else 0f
+        val bg = GlanceTheme.colors.widgetBackground.getColor(context).copy(alpha = bgAlpha)
+        val containerModifier = GlanceModifier
+            .fillMaxSize()
+            .background(bg)
+            .cornerRadius(android.R.dimen.system_app_widget_background_radius)
+            .padding(top = contentInset, bottom = contentInset, end = contentInset)
         // Center the content block vertically and pin it to the start (left) to match the KWGT look.
         // The whole surface is one big tap target (OpenAppAction); the inner sections keep their own
         // click actions (calendar/maps/weather/events) and take precedence in their own areas, so the
@@ -1010,41 +1009,45 @@ class FrontWidget : GlanceAppWidget() {
             modifier = GlanceModifier.fillMaxWidth().padding(start = contentInset),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Animated wavy ring: an auto-cycling 8-frame ViewFlipper (the only reliable way to
-            // animate inside RemoteViews) morphs the wave so the ring visibly moves. Each frame is
-            // rendered at a capped resolution and upscaled by its ImageView, so all 8 frames stay
-            // well under the RemoteViews bitmap budget - the ring moves without the blank-widget
-            // regression that full-density frames caused on strict OEM launchers.
-            // Tapping the ring forces an immediate Monarch spend sync (see SyncSpendAction),
-            // separate from the whole-widget "open app" tap. The clickable lives on a wrapping Box
-            // (a real container view) rather than on AndroidRemoteViews directly, because Glance
-            // does not reliably attach a click PendingIntent to an embedded RemoteViews subtree.
-            Box(
-                modifier = GlanceModifier.size(ringDp.dp).clickable(actionRunCallback<SyncSpendAction>())
+            // The sync tap target is ONLY the ring + text (wrap-content), not the full-width row, and
+            // uses the no-ripple drawable so tapping shows no white highlight. Tapping it forces an
+            // immediate Monarch spend sync (see SyncSpendAction), overriding the container's open-app
+            // tap just in this area. The clickable lives on a wrapping container (not on the embedded
+            // AndroidRemoteViews) because Glance won't reliably attach a PendingIntent to a RemoteViews
+            // subtree.
+            Row(
+                modifier = GlanceModifier.clickable(actionRunCallback<SyncSpendAction>(), R.drawable.no_ripple),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                AndroidRemoteViews(
-                    remoteViews = wavyFlipperRemoteViews(
-                        context = context,
-                        fraction = fraction,
-                        sizeDp = ringDp,
-                        strokeDp = 5f,
-                    trackArgb = trackArgb,
-                    indicatorArgb = indicatorArgb,
-                    spoken = spoken
-                    ),
-                    modifier = GlanceModifier.size(ringDp.dp)
-                )
-            }
-            Spacer(modifier = GlanceModifier.width(10.dp))
-            Column {
-                Text(
-                    text = cashLeft,
-                    style = TextStyle(fontSize = amountSp, fontWeight = FontWeight.Bold, color = onSurface)
-                )
-                Text(
-                    text = syncText,
-                    style = TextStyle(fontSize = captionSp, color = onSurfaceVariant)
-                )
+                // Animated wavy ring: an auto-cycling 8-frame ViewFlipper (the only reliable way to
+                // animate inside RemoteViews) morphs the wave so the ring visibly moves. Each frame is
+                // rendered at a capped resolution and upscaled by its ImageView, so all 8 frames stay
+                // well under the RemoteViews bitmap budget.
+                Box(modifier = GlanceModifier.size(ringDp.dp)) {
+                    AndroidRemoteViews(
+                        remoteViews = wavyFlipperRemoteViews(
+                            context = context,
+                            fraction = fraction,
+                            sizeDp = ringDp,
+                            strokeDp = 5f,
+                            trackArgb = trackArgb,
+                            indicatorArgb = indicatorArgb,
+                            spoken = spoken
+                        ),
+                        modifier = GlanceModifier.size(ringDp.dp)
+                    )
+                }
+                Spacer(modifier = GlanceModifier.width(10.dp))
+                Column {
+                    Text(
+                        text = cashLeft,
+                        style = TextStyle(fontSize = amountSp, fontWeight = FontWeight.Bold, color = onSurface)
+                    )
+                    Text(
+                        text = syncText,
+                        style = TextStyle(fontSize = captionSp, color = onSurfaceVariant)
+                    )
+                }
             }
         }
     }
