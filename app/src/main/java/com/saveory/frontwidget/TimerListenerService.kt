@@ -76,7 +76,11 @@ class TimerListenerService : NotificationListenerService() {
         val prevTotal = prefs.getLong(KEY_TIMER_TOTAL, 0L)
         val prevPhase = prefs.getString(KEY_TIMER_PHASE, PHASE_NONE) ?: PHASE_NONE
         val dismissed = prefs.getBoolean(KEY_TIMER_DISMISSED, false)
-        val hadTimer = prevPhase != PHASE_NONE || prevFinish > 0L
+        // Whether we're actually tracking a Clock TIMER (running, or already showing its ended
+        // state) - the only situation in which a shared-channel "Firing" notification is ours to
+        // render as an expired timer. Deliberately NOT "prevFinish > 0" (stale state from a long-
+        // gone timer would let a firing ALARM flip the widget into the ended-timer state).
+        val trackingTimer = prevPhase == PHASE_ACTIVE || prevPhase == PHASE_EXPIRED
 
         // The ended ("expired") state is shown ONLY while the Clock is still firing the timer, plus a
         // brief grace window right as a running countdown crosses its finish (to bridge the instant
@@ -90,10 +94,16 @@ class TimerListenerService : NotificationListenerService() {
             running > 0 -> PHASE_ACTIVE
             // User cleared it on the widget (X): stay hidden while Clock is still ringing it.
             dismissed && firing -> PHASE_NONE
-            firing && hadTimer -> PHASE_EXPIRED
+            // Sticky while firing, but only if this firing belongs to a timer we were tracking -
+            // so a firing alarm on the shared "Firing" channel can never enter the ended state.
+            firing && trackingTimer -> PHASE_EXPIRED
             prevPhase == PHASE_ACTIVE && prevFinish > 0L && prevFinish - now <= END_GRACE_MS -> PHASE_EXPIRED
             else -> PHASE_NONE
         }
+
+        // Diagnosis hook (esp. for OEM Clock builds that format firing notifications differently):
+        // shows exactly how a scan resolved, so an alarm-misread-as-timer is visible in logcat.
+        Log.d(TAG, "phase: running=$running firing=$firing prev=$prevPhase tracking=$trackingTimer -> $phase")
 
         var finish = prevFinish
         var total = prevTotal
@@ -204,6 +214,12 @@ class TimerListenerService : NotificationListenerService() {
             // linger after the child timers are gone and, on some builds, expose a stale time string
             // that would be misread as a still-running timer.
             if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) continue
+            // Never treat a FIRING notification as a running countdown. Clock shares one "Firing"
+            // channel for alarms AND timers ("Firing alarms & timers"), and a firing alarm's title
+            // is a clock time like "6:12" that parseRemaining() would misread as "6:12 remaining" -
+            // showing a phantom timer whenever an alarm goes off. Running timers live on the "Timers"
+            // channel; the Firing channel only appears once something has already ended.
+            if (n.channelId == FIRING_CHANNEL) continue
             val finish = timerFinish(n) ?: continue
             if (finish > now && finish < soonest) soonest = finish
         }
