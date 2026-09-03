@@ -947,8 +947,8 @@ class FrontWidget : GlanceAppWidget() {
      * left this week, plus a one-word sync state - so a glance answers "how much can I still spend?".
      *
      * Accessibility (per Android's a11y + Material 3 guidance):
-     * - The ring carries one spoken [contentDescription] ("$X left, synced N min ago" or "Over
-     *   budget, no cash left"), so the over state never rides on the red ring colour alone.
+     * - The ring carries one spoken [contentDescription] ("$X left, last synced N min ago" or
+     *   "$X over budget"), so the over state never rides on the red ring colour alone.
      * - Colours come from [GlanceTheme] M3 roles (onSurface / surfaceVariant / primary / error), so
      *   contrast holds on any wallpaper and the ring follows the user's dynamic theme.
      * - Type/ring scale with the shared SECTION_SCALE, tracking the user's density/text-size choice.
@@ -976,14 +976,20 @@ class FrontWidget : GlanceAppWidget() {
         val amountSp = (16f * SECTION_SCALE).sp
         val captionSp = (10f * SECTION_SCALE).sp
 
-        // Only two things on the face: cash left and the sync/auth state. They stack beside the
+        // Only two things on the face: the cash figure and the sync/auth state. They stack beside the
         // ring (amount over state), mirroring the NYC time-over-label block. auth_ok=false means no
         // Monarch session, so the number can't be trusted - say "Sign in" rather than a stale figure.
-        val cashLeft = formatDollars(spend.remainingCents)
+        // When over budget, show how far over as a negative figure (spent - limit) instead of a flat
+        // "$0 left", so the amount itself carries the overspend (not just the red ring colour).
+        val overCents = (spend.spentCents - spend.limitCents).coerceAtLeast(0L)
+        val cashLeft = if (spend.over) "-" + formatDollars(overCents) else formatDollars(spend.remainingCents)
         val synced = spend.authOk && spend.asOfMs > 0L
+        // Show the wall-clock time of the last successful read rather than a bare "Synced" word, so a
+        // glance tells the user how fresh the figure is. Locale-aware 12/24h via DateUtils.
+        val lastSyncTime = DateUtils.formatDateTime(context, spend.asOfMs, DateUtils.FORMAT_SHOW_TIME)
         val syncText = when {
             !spend.authOk -> "Sign in"
-            synced -> "Synced"
+            synced -> "Last sync $lastSyncTime"
             else -> "Not synced"
         }
 
@@ -992,11 +998,14 @@ class FrontWidget : GlanceAppWidget() {
 
         val spoken = buildString {
             append("Weekly groceries and fun. ")
-            append(if (spend.over) "Over budget, no cash left. " else "$cashLeft left. ")
+            append(
+                if (spend.over) formatDollars(overCents) + " over budget. "
+                else "$cashLeft left. "
+            )
             append(
                 when {
                     !spend.authOk -> "Not connected to Monarch, sign in."
-                    synced -> "Synced " + DateUtils.getRelativeTimeSpanString(
+                    synced -> "Last synced " + DateUtils.getRelativeTimeSpanString(
                         spend.asOfMs, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
                     )
                     else -> "Not synced"
