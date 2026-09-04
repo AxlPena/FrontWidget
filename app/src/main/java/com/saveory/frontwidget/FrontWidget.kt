@@ -15,6 +15,7 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,6 +46,7 @@ import androidx.glance.layout.*
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
 import androidx.compose.ui.unit.DpSize
 import com.saveory.frontwidget.data.AlarmRepository
 import com.saveory.frontwidget.data.WeeklySpend
@@ -965,7 +967,6 @@ class FrontWidget : GlanceAppWidget() {
             else -> 0f
         }
 
-        val onSurfaceVariant = GlanceTheme.colors.onSurfaceVariant
         val onSurface = GlanceTheme.colors.onSurface
         // The ring outline (track) is drawn in the widget background colour so it reads as a subtle
         // groove in the surface rather than a contrasting band; only the wavy indicator stands out.
@@ -973,6 +974,10 @@ class FrontWidget : GlanceAppWidget() {
         val indicatorArgb =
             (if (spend.over) GlanceTheme.colors.error else GlanceTheme.colors.primary)
                 .getColor(context).toArgb()
+        // Sync caption is keyed to the SAME hue as the ring indicator (primary, or error when over),
+        // forced fully opaque (alpha 0xFF) so it reads as a solid label instead of the muted
+        // onSurfaceVariant grey it used before.
+        val syncColor = ColorProvider(Color(indicatorArgb or 0xFF000000.toInt()))
         val amountSp = (16f * SECTION_SCALE).sp
         val captionSp = (10f * SECTION_SCALE).sp
 
@@ -1054,7 +1059,7 @@ class FrontWidget : GlanceAppWidget() {
                     )
                     Text(
                         text = syncText,
-                        style = TextStyle(fontSize = captionSp, color = onSurfaceVariant)
+                        style = TextStyle(fontSize = captionSp, color = syncColor)
                     )
                 }
             }

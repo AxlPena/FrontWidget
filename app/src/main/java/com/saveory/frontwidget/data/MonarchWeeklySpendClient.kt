@@ -101,6 +101,11 @@ object MonarchWeeklySpendClient {
                 .putLong(WeeklySpendRepository.KEY_SPENT_CENTS, newSpent)
                 .apply()
 
+            // 2b. Plan inputs for the on-device forecast: per-month G+F pool (plan start -> last
+            // Sunday) and extra non-paycheck income (plan start -> today). These drive the LIMIT
+            // (leftover carry across months); a failure here must NOT disturb the Spent write above.
+            maybeWritePlanInputs(prefs, session, anchor, monday, includePending)
+
             // 3. After a tap that actually queued a refresh, sum again ~60s later for the new pending.
             if (trigger == Trigger.TAP && refreshQueued) {
                 WeeklySpendWorker.scheduleFollowUp(app)
@@ -129,6 +134,52 @@ object MonarchWeeklySpendClient {
             Log.w(TAG, "Sync failed: ${e.message}")
             SyncResult.TransientError(e.message ?: "network error")
         }
+    }
+
+    /**
+     * Reads and stores the [WeeklySpendPlan] forecast inputs (per-month G+F pool + extra income).
+     * The G+F pool runs plan start -> last Sunday ([monday] minus a day); income runs plan start ->
+     * [anchor] (today) so a fresh deposit counts on the same sync. No-op before plan start. Any read
+     * failure is logged and swallowed so the already-written Spent value stands.
+     */
+    private fun maybeWritePlanInputs(
+        prefs: android.content.SharedPreferences,
+        session: MonarchSessionStore.Session,
+        anchor: LocalDate,
+        monday: LocalDate,
+        includePending: Boolean
+    ) {
+        val planStart = WeeklySpendPlan.PLAN_START
+        if (anchor.isBefore(planStart)) return
+        val lastSunday = monday.minusDays(1)
+        try {
+            val inputs = MonarchGraphQlClient.fetchPlanInputs(
+                session = session,
+                planStart = planStart.toString(),
+                poolEnd = lastSunday.toString(),
+                incomeEnd = anchor.toString(),
+                includePending = includePending
+            )
+            val currentMonthLabel = "%04d-%02d".format(anchor.year, anchor.monthValue)
+            val spentMtd = inputs.spentByMonthCents[currentMonthLabel] ?: 0L
+            prefs.edit()
+                .putString(WeeklySpendRepository.KEY_SPENT_BY_MONTH_JSON, centsMapToJson(inputs.spentByMonthCents))
+                .putString(WeeklySpendRepository.KEY_EXTRA_BY_MONTH_JSON, centsMapToJson(inputs.extraByMonthCents))
+                .putLong(WeeklySpendRepository.KEY_SPENT_MTD_CENTS, spentMtd)
+                .apply()
+            Log.d(
+                TAG,
+                "Plan inputs: pool=${inputs.spentByMonthCents} extra=${inputs.extraByMonthCents} mtd=$spentMtd"
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Plan-input read failed (limit keeps last values): ${e.message}")
+        }
+    }
+
+    private fun centsMapToJson(map: Map<String, Long>): String {
+        val obj = org.json.JSONObject()
+        for ((label, cents) in map) obj.put(label, cents)
+        return obj.toString()
     }
 
     /**
