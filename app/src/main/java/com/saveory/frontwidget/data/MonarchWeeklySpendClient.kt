@@ -28,8 +28,9 @@ object MonarchWeeklySpendClient {
     private const val TAG = "WeeklySpendSync"
     private val ZONE: ZoneId = ZoneId.of("America/New_York")
 
-    // "Refresh accounts on widget sync" gates (docs/weekly-spend-widget.md):
-    //  - PERIODIC (15-min loop): queue a refresh only if the cards' last refresh is >4h old.
+    // "Refresh accounts on widget sync" gates (docs/weekly-spend-widget.md). The refresh set is all
+    // spendable accounts (every card + checking/savings/PayPal, not loans/investments):
+    //  - PERIODIC (15-min loop): queue a refresh only if the last refresh is >4h old.
     //  - TAP / syncNow / app resume: queue a refresh (debounced so rapid taps / a pending follow-up
     //    don't re-queue), then schedule a one-shot follow-up fetch ~60s later for the new pending rows.
     //  - FOLLOWUP: never refresh — just re-read whatever Monarch has now.
@@ -193,11 +194,13 @@ object MonarchWeeklySpendClient {
         session: MonarchSessionStore.Session,
         trigger: Trigger
     ): Boolean {
+        // Optional last-4 allowlist that narrows the refresh set. Blank (the default) = every
+        // spendable account (all cards + checking/savings/PayPal), resolved by type in
+        // MonarchGraphQlClient.requestAccountsRefresh — so an empty set here is NOT a reason to skip.
         val masks = prefs.getString(
             WeeklySpendRepository.KEY_REFRESH_ACCOUNT_MASKS,
             WeeklySpendRepository.DEFAULT_REFRESH_MASKS
         ).orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-        if (masks.isEmpty()) return false
 
         val lastRefresh = prefs.getLong(WeeklySpendRepository.KEY_LAST_REFRESH_MS, 0L)
         val now = System.currentTimeMillis()

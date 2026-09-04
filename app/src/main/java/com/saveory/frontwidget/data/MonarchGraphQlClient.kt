@@ -76,9 +76,27 @@ object MonarchGraphQlClient {
             id
             displayName
             mask
+            isHidden
+            isAsset
+            includeInNetWorth
+            type { name }
+            subtype { name }
           }
         }
     """
+
+    // Account types that are NOT weekly-spend sources, so we never queue a bank refresh on them
+    // (docs/weekly-spend-widget.md: "Do not refresh loans, investments, hidden, or inactive
+    // accounts"). Loans (Lexus auto, SoFi) and brokerage/investment/retirement/crypto (Fidelity,
+    // 401k/403b, Capital One ASP, Coinbase, HSA) are skipped; depository + credit (every card,
+    // checking, savings, PayPal, Personal Profile) are the refresh set.
+    private val NON_SPEND_ACCOUNT_TYPES = setOf(
+        "loan", "brokerage", "investment", "retirement", "crypto", "cryptocurrency"
+    )
+    private val NON_SPEND_ACCOUNT_SUBTYPES = setOf(
+        "hsa", "401k", "403b", "ira", "roth", "brokerage", "crypto", "cryptocurrency",
+        "auto", "auto_loan", "student", "student_loan", "mortgage"
+    )
 
     // Non-blocking bank refresh (Plaid/MX). Mirrors monarchmoneycommunity.request_accounts_refresh:
     // it QUEUES the pull and returns immediately — new pending rows are NOT in this round-trip.
@@ -94,34 +112,29 @@ object MonarchGraphQlClient {
     data class RefreshOutcome(val queued: Boolean, val accountCount: Int)
 
     /**
-     * QUEUES a non-blocking bank refresh for only the accounts whose last-4 is in [masks] (the
-     * food/Fun cards — Gold ·1009, Platinum ·3006, optional grocery debit). Never waits on
-     * hasSyncInProgress (that can take minutes and blows the worker timeout). Throws
-     * [MonarchApi.AuthException] if the session is rejected; other failures are the caller's to
-     * ignore per the spec ("refresh mutation fails -> still fetch transactions").
+     * QUEUES a non-blocking bank refresh for every spendable account — all active, visible accounts
+     * except loans and investments (docs/weekly-spend-widget.md, "Refresh accounts on widget sync").
+     * That means every card, checking, savings, PayPal, and Personal Profile, NOT just last-4
+     * 1009/3006. If [masks] is non-empty it narrows that set to those last-4s (an optional user
+     * override); empty means the full spendable set. Never waits on hasSyncInProgress (that can take
+     * minutes and blows the worker timeout). Throws [MonarchApi.AuthException] if the session is
+     * rejected; other failures are the caller's to ignore per the spec ("refresh mutation fails ->
+     * still fetch transactions").
      */
     fun requestAccountsRefresh(
         session: MonarchSessionStore.Session,
         masks: Set<String>
     ): RefreshOutcome {
-        val wanted = masks.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-        if (wanted.isEmpty()) return RefreshOutcome(false, 0)
-
         val accData = MonarchApi.graphql(session, "GetAccounts", ACCOUNTS_QUERY, JSONObject())
         val accounts = accData.optJSONArray("accounts") ?: return RefreshOutcome(false, 0)
-
-        val ids = mutableListOf<String>()
-        for (i in 0 until accounts.length()) {
-            val a = accounts.optJSONObject(i) ?: continue
-            val id = a.optString("id").takeIf { it.isNotBlank() } ?: continue
-            // Prefer the account's own mask; fall back to trailing digits of the display name.
-            val last4 = a.optString("mask").ifBlank {
-                a.optString("displayName").filter { it.isDigit() }.takeLast(4)
-            }
-            if (last4.isNotEmpty() && last4 in wanted) ids.add(id)
-        }
+        val ids = selectRefreshAccountIds(parseAccountRows(accounts), masks)
         if (ids.isEmpty()) {
-            Log.d(TAG, "No accounts matched refresh masks $wanted; nothing queued")
+            val wanted = masks.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+            Log.d(
+                TAG,
+                if (wanted.isEmpty()) "No spendable accounts to refresh; nothing queued"
+                else "No accounts matched refresh masks $wanted; nothing queued"
+            )
             return RefreshOutcome(false, 0)
         }
 
@@ -260,6 +273,70 @@ object MonarchGraphQlClient {
             spentByMonthCents = spentByMonth.mapValues { Math.round(it.value * 100.0).coerceAtLeast(0L) },
             extraByMonthCents = extraByMonth.mapValues { Math.round(it.value * 100.0).coerceAtLeast(0L) },
         )
+    }
+
+    /** A single account from GetAccounts, flattened to the fields the refresh selection needs. */
+    internal data class AccountRow(
+        val id: String,
+        val mask: String,
+        val displayName: String,
+        val isHidden: Boolean,
+        val type: String,
+        val subtype: String,
+    )
+
+    /** Flattens the GetAccounts `accounts` array into [AccountRow]s (skips rows with no id). */
+    internal fun parseAccountRows(accounts: JSONArray): List<AccountRow> {
+        val rows = ArrayList<AccountRow>(accounts.length())
+        for (i in 0 until accounts.length()) {
+            val a = accounts.optJSONObject(i) ?: continue
+            val id = a.optString("id").takeIf { it.isNotBlank() } ?: continue
+            rows.add(
+                AccountRow(
+                    id = id,
+                    mask = a.optString("mask"),
+                    displayName = a.optString("displayName"),
+                    isHidden = a.optBoolean("isHidden", false),
+                    type = a.optJSONObject("type")?.optString("name").orEmpty(),
+                    subtype = a.optJSONObject("subtype")?.optString("name").orEmpty(),
+                )
+            )
+        }
+        return rows
+    }
+
+    /**
+     * True for accounts that can post Groceries + Fun and should be bank-refreshed: active, visible,
+     * and neither a loan nor an investment/retirement/crypto account. Filters on Monarch's
+     * `type`/`subtype` names plus `isHidden` (see [NON_SPEND_ACCOUNT_TYPES]).
+     */
+    internal fun isSpendableAccount(account: AccountRow): Boolean {
+        if (account.isHidden) return false
+        if (account.type.trim().lowercase() in NON_SPEND_ACCOUNT_TYPES) return false
+        if (account.subtype.trim().lowercase() in NON_SPEND_ACCOUNT_SUBTYPES) return false
+        return true
+    }
+
+    /**
+     * Selects the account ids to bank-refresh (docs/weekly-spend-widget.md, "Refresh accounts on
+     * widget sync"): every spendable account — all active, visible accounts except loans and
+     * investments (every card, checking, savings, PayPal, Personal Profile). A non-empty [masks] set
+     * NARROWS that to accounts whose last-4 (own mask, else trailing display-name digits) is listed;
+     * a blank set (the default) returns the full spendable set. Pure — no network — so it is
+     * unit-testable against a synthetic household.
+     */
+    internal fun selectRefreshAccountIds(accounts: List<AccountRow>, masks: Set<String>): List<String> {
+        val wanted = masks.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val ids = ArrayList<String>()
+        for (a in accounts) {
+            if (!isSpendableAccount(a)) continue
+            if (wanted.isNotEmpty()) {
+                val last4 = a.mask.ifBlank { a.displayName.filter { it.isDigit() }.takeLast(4) }
+                if (last4.isEmpty() || last4 !in wanted) continue
+            }
+            ids.add(a.id)
+        }
+        return ids
     }
 
     private fun monthLabelOf(date: String?): String? {

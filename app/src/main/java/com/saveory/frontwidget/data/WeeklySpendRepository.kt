@@ -178,13 +178,16 @@ class WeeklySpendRepository(private val context: Context) {
         const val KEY_LIMIT_OVERRIDE_WEEK = "weekly_limit_override_week"
 
         // "Refresh accounts on widget sync" (docs/weekly-spend-widget.md): the sync QUEUES a
-        // non-blocking bank refresh for only the food/Fun cards, then reads whatever Monarch already
-        // has. KEY_LAST_REFRESH_MS is when we last queued a refresh (drives the 4h periodic gate and
-        // the tap debounce). KEY_REFRESH_ACCOUNT_MASKS is a comma-separated set of card last-4s to
-        // refresh — resolved to account ids by mask at fetch time (never hard-code Monarch ids).
+        // non-blocking bank refresh, then reads whatever Monarch already has. KEY_LAST_REFRESH_MS is
+        // when we last queued a refresh (drives the 4h periodic gate and the tap debounce).
+        // The refresh set is ALL active, visible accounts except loans and investments (every card,
+        // checking, savings, PayPal, Personal Profile) — resolved by account type at fetch time, not
+        // by last-4 (PayPal / Personal Profile have no numeric mask). KEY_REFRESH_ACCOUNT_MASKS is an
+        // optional comma-separated last-4 allowlist that NARROWS that set; blank (the default) means
+        // refresh every spendable account.
         const val KEY_LAST_REFRESH_MS = "weekly_last_refresh_ms"
         const val KEY_REFRESH_ACCOUNT_MASKS = "weekly_refresh_account_masks"
-        const val DEFAULT_REFRESH_MASKS = "1009,3006"            // Gold ·1009, Platinum ·3006
+        const val DEFAULT_REFRESH_MASKS = ""                     // blank = all spendable accounts
 
         // Endpoint the on-device sync GETs to fetch the `weekly_spend` result (JSON with
         // spent_cents / as_of_ms / auth_ok / pending_included). Blank until a phone-side Monarch

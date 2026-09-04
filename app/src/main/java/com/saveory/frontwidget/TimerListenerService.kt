@@ -66,10 +66,16 @@ class TimerListenerService : NotificationListenerService() {
             Log.w(TAG, "timer scan failed", e); 0L
         }
         val firing = try {
-            hasFiringTimerNotif(removedKey)
+            scanFiring(removedKey)
         } catch (e: Exception) {
-            Log.w(TAG, "firing scan failed", e); false
+            Log.w(TAG, "firing scan failed", e); FiringScan(any = false, timer = false)
         }
+        // `firing.any`  -> any Clock "Firing" notification is up (timer OR alarm).
+        // `firing.timer`-> at least one of them is classified as a TIMER firing (not an alarm).
+        // The ended state keys off `firing.timer`, so a ringing ALARM can never paint the ended
+        // timer even while we were tracking a recent timer (the reported bug).
+        val firingAny = firing.any
+        val firingTimer = firing.timer
 
         val prefs = getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
         val prevFinish = prefs.getLong(KEY_TIMER_FINISH, 0L)
@@ -90,20 +96,19 @@ class TimerListenerService : NotificationListenerService() {
         // matching the phone. (Stopping a running countdown early likewise removes its notification ->
         // running==0 and not firing -> NONE.) A previously-sticky EXPIRED phase kept the ended row on
         // screen forever after an external stop, which is the reported "timer won't disappear" bug.
-        val phase = when {
-            running > 0 -> PHASE_ACTIVE
-            // User cleared it on the widget (X): stay hidden while Clock is still ringing it.
-            dismissed && firing -> PHASE_NONE
-            // Sticky while firing, but only if this firing belongs to a timer we were tracking -
-            // so a firing alarm on the shared "Firing" channel can never enter the ended state.
-            firing && trackingTimer -> PHASE_EXPIRED
-            prevPhase == PHASE_ACTIVE && prevFinish > 0L && prevFinish - now <= END_GRACE_MS -> PHASE_EXPIRED
-            else -> PHASE_NONE
-        }
+        val phase = decidePhase(
+            now = now,
+            running = running,
+            firingAny = firingAny,
+            firingTimer = firingTimer,
+            prevPhase = prevPhase,
+            prevFinish = prevFinish,
+            dismissed = dismissed,
+        )
 
         // Diagnosis hook (esp. for OEM Clock builds that format firing notifications differently):
         // shows exactly how a scan resolved, so an alarm-misread-as-timer is visible in logcat.
-        Log.d(TAG, "phase: running=$running firing=$firing prev=$prevPhase tracking=$trackingTimer -> $phase")
+        Log.d(TAG, "phase: running=$running firingAny=$firingAny firingTimer=$firingTimer prev=$prevPhase tracking=$trackingTimer -> $phase")
 
         var finish = prevFinish
         var total = prevTotal
@@ -125,9 +130,9 @@ class TimerListenerService : NotificationListenerService() {
             else -> {
                 finish = 0L
                 total = 0L
-                // Timer is truly gone (nothing firing): drop the dismiss latch so the next timer
-                // starts fresh instead of being suppressed by a stale flag.
-                if (!firing) newDismissed = false
+                // Timer is truly gone (nothing firing at all): drop the dismiss latch so the next
+                // timer starts fresh instead of being suppressed by a stale flag.
+                if (!firingAny) newDismissed = false
             }
         }
 
@@ -189,16 +194,44 @@ class TimerListenerService : NotificationListenerService() {
         (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(expiryPendingIntent())
     }
 
-    /** True if Google Clock has a "Firing" notification up (an expired timer or alarm going off).
-     *  [excludeKey] is the key of a just-removed notification to ignore (see onNotificationRemoved). */
-    private fun hasFiringTimerNotif(excludeKey: String?): Boolean {
-        val active = activeNotifications ?: return false
-        return active.any {
-            it.packageName == CLOCK_PKG &&
-                it.key != excludeKey &&
-                it.notification?.channelId == FIRING_CHANNEL
+    /** Result of scanning Clock's "Firing" notifications: whether ANY is up, and whether any is a TIMER. */
+    private data class FiringScan(val any: Boolean, val timer: Boolean)
+
+    /**
+     * Scans Google Clock's "Firing" channel (shared by alarms AND timers) and classifies what's
+     * ringing. [excludeKey] is a just-removed notification to ignore (see onNotificationRemoved).
+     *
+     * Google Clock puts firing timers and firing alarms on the same channel with the same
+     * `category=alarm`, so the channel alone can't tell them apart. They differ in their action
+     * buttons and layout (verified on this build): a firing ALARM offers "Snooze"; a firing TIMER
+     * offers "Add 1 min" and renders a custom countdown view. [classifyFiring] encodes that.
+     */
+    private fun scanFiring(excludeKey: String?): FiringScan {
+        val active = activeNotifications ?: return FiringScan(any = false, timer = false)
+        var any = false
+        var timer = false
+        for (sbn in active) {
+            if (sbn.packageName != CLOCK_PKG) continue
+            if (sbn.key == excludeKey) continue
+            val n = sbn.notification ?: continue
+            if (n.channelId != FIRING_CHANNEL) continue
+            any = true
+            val kind = firingKindOf(n)
+            if (kind == FiringKind.TIMER) timer = true
+            Log.d(TAG, "firing notif: kind=$kind actions=${actionTitlesOf(n)} customView=${hasCustomView(n)}")
         }
+        return FiringScan(any = any, timer = timer)
     }
+
+    private fun hasCustomView(n: Notification): Boolean =
+        n.contentView != null || n.bigContentView != null || n.headsUpContentView != null
+
+    private fun actionTitlesOf(n: Notification): List<String> =
+        n.actions?.mapNotNull { it?.title?.toString() } ?: emptyList()
+
+    /** Classifies a firing Clock notification as a timer or an alarm from its layout + actions. */
+    private fun firingKindOf(n: Notification): FiringKind =
+        classifyFiring(hasCustomView(n), actionTitlesOf(n))
 
     /** The SOONEST future finish among running Clock timers (0 if none) - that's the one about to fire.
      *  [excludeKey] is the key of a just-removed notification to ignore (see onNotificationRemoved). */
@@ -292,10 +325,76 @@ class TimerListenerService : NotificationListenerService() {
         return if (total in 1_000L..24L * 3600_000L) total else null
     }
 
+    /** What a Clock "Firing" notification represents. UNKNOWN is treated as NOT a timer (safe). */
+    enum class FiringKind { TIMER, ALARM, UNKNOWN }
+
     companion object {
         const val TAG = "TimerListener"
         const val CLOCK_PKG = "com.google.android.deskclock"
         const val FIRING_CHANNEL = "Firing"
+
+        /**
+         * Pure classifier for a firing Clock notification, split out so it is unit-testable without
+         * a device. Grounded in the real notifications from Google Clock (both share
+         * channel="Firing", category="alarm"):
+         *   - firing ALARM  -> actions ["Snooze", "Stop"], standard template (no custom view)
+         *   - firing TIMER  -> actions ["Stop", "Add 1 min"], custom countdown RemoteView
+         *
+         * A "Snooze" action is unique to alarms; an add-a-minute action is unique to timers. The
+         * custom-view flag is the tiebreaker. Anything we can't place is UNKNOWN, and callers treat
+         * UNKNOWN as "not a timer" so a ringing alarm can never be rendered as an ended timer.
+         */
+        /**
+         * Pure phase decision, split out so the alarm-vs-timer race is unit-testable without a
+         * device. Priority order:
+         *  1. a live countdown -> ACTIVE
+         *  2. user dismissed on the widget while anything Clock is still ringing -> stay NONE
+         *  3. a TIMER is firing AND we were tracking a timer -> EXPIRED (ended state). Keyed on
+         *     [firingTimer], NOT "any firing", so a ringing ALARM can never show the ended timer even
+         *     when we were mid-timer (the reported bug).
+         *  4. brief grace right as a running countdown crosses its finish -> EXPIRED
+         *  5. otherwise NONE.
+         */
+        internal fun decidePhase(
+            now: Long,
+            running: Long,
+            firingAny: Boolean,
+            firingTimer: Boolean,
+            prevPhase: String,
+            prevFinish: Long,
+            dismissed: Boolean,
+        ): String {
+            val trackingTimer = prevPhase == PHASE_ACTIVE || prevPhase == PHASE_EXPIRED
+            return when {
+                running > 0 -> PHASE_ACTIVE
+                dismissed && firingAny -> PHASE_NONE
+                firingTimer && trackingTimer -> PHASE_EXPIRED
+                // Brief bridge right as a running countdown crosses its finish, before the firing
+                // notification appears. Bounded to |now - finish| <= grace on BOTH sides: a finish
+                // only a few seconds away (just before/after) qualifies, but a stale ACTIVE with a
+                // long-past finish does NOT (that used to resolve EXPIRED for any past finish, so a
+                // cancelled timer / a later alarm could paint a phantom ended timer).
+                prevPhase == PHASE_ACTIVE && prevFinish > 0L &&
+                    kotlin.math.abs(prevFinish - now) <= END_GRACE_MS -> PHASE_EXPIRED
+                else -> PHASE_NONE
+            }
+        }
+
+        internal fun classifyFiring(hasCustomView: Boolean, actionTitles: List<String>): FiringKind {
+            val titles = actionTitles.map { it.trim().lowercase() }
+            val hasSnooze = titles.any { it.contains("snooze") }
+            val hasAddMinute = titles.any { t ->
+                (t.contains("add") && t.contains("min")) ||   // "Add 1 min" / "Add a minute"
+                    Regex("""\+\s*\d""").containsMatchIn(t) || // "+1:00", "+ 1"
+                    (t.contains("min") && Regex("""\d""").containsMatchIn(t)) // "1 min"
+            }
+            return when {
+                hasSnooze -> FiringKind.ALARM        // alarms snooze; timers never do
+                hasAddMinute -> FiringKind.TIMER     // only timers add a minute
+                hasCustomView -> FiringKind.TIMER    // timer draws a custom countdown; alarm uses the plain template
+                else -> FiringKind.UNKNOWN
+            }
+        }
         // A running countdown that disappears within this window of its finish is treated as expired
         // (vs. cancelled), absorbing listener latency around the finish instant.
         const val END_GRACE_MS = 3000L
