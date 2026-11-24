@@ -1300,7 +1300,7 @@ class FrontWidget : GlanceAppWidget() {
             }
             setOnClickPendingIntent(
                 R.id.event_frame_root,
-                eventClickPendingIntent(context, index, event.eventId, event.startTime)
+                eventClickPendingIntent(context, index, event.eventId, event.calendarId, event.startTime)
             )
         }
     }
@@ -1375,11 +1375,13 @@ class FrontWidget : GlanceAppWidget() {
         context: Context,
         requestCode: Int,
         eventId: String,
+        calendarId: String,
         startMillis: Long
     ): PendingIntent {
         val intent = Intent(context, EventClickReceiver::class.java)
             .setAction(EventClickReceiver.ACTION)
             .putExtra(EventClickReceiver.EXTRA_EVENT_ID, eventId)
+            .putExtra(EventClickReceiver.EXTRA_CALENDAR_ID, calendarId)
             .putExtra(EventClickReceiver.EXTRA_START, startMillis)
         return PendingIntent.getBroadcast(
             context,

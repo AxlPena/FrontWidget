@@ -120,8 +120,9 @@ class OpenEventAction : ActionCallback {
     ) {
         val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
         val eventId = prefs.getString("active_event_id", "") ?: ""
+        val calendarId = prefs.getString("active_event_calendar_id", "") ?: ""
         val startMillis = prefs.getLong("active_event_start", 0L)
-        context.startActivity(WidgetIntents.protonEvent(context, eventId, startMillis))
+        context.startActivity(WidgetIntents.protonEvent(context, eventId, calendarId, startMillis))
     }
 }
 
@@ -134,14 +135,16 @@ class EventClickReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != ACTION) return
         val eventId = intent.getStringExtra(EXTRA_EVENT_ID) ?: ""
+        val calendarId = intent.getStringExtra(EXTRA_CALENDAR_ID) ?: ""
         val startMillis = intent.getLongExtra(EXTRA_START, 0L)
-        context.startActivity(WidgetIntents.protonEvent(context, eventId, startMillis))
+        context.startActivity(WidgetIntents.protonEvent(context, eventId, calendarId, startMillis))
     }
 
     companion object {
         const val ACTION = "com.saveory.frontwidget.action.OPEN_EVENT"
         const val EXTRA_START = "event_start"
         const val EXTRA_EVENT_ID = "event_id"
+        const val EXTRA_CALENDAR_ID = "event_calendar_id"
     }
 }
 
@@ -288,14 +291,25 @@ object WidgetIntents {
      * so a recurring series opens at its first occurrence rather than a blank form. Falls back to
      * the day view at [startMillis] when the id is missing or Proton Calendar can't handle the link.
      */
-    fun protonEvent(context: Context, eventId: String, startMillis: Long): Intent {
-        if (useProtonCalendar(context) && eventId.isNotBlank() && isPackageInstalled(context, PROTON_CALENDAR)) {
+    fun protonEvent(context: Context, eventId: String, calendarId: String, startMillis: Long): Intent {
+        // A tap on a SPECIFIC event always opens that exact event in Proton Calendar when it's
+        // installed and we have its id — independent of the calendar-target setting. The widget's
+        // events are Proton events, and a device calendar can't render a Proton event anyway (it
+        // could only land on the day), so the exact-event deep link is the only faithful target.
+        // The calendar-target toggle still governs the generic date-header / day-view taps below.
+        //
+        // Proton Calendar's event/details deep link needs BOTH the eventId AND its calendarId
+        // (verified against the app's own deep-link builder: event/details?eventId=..&calendarId=..
+        // &occurrenceNumber=..). Without calendarId it can't resolve which calendar the event lives
+        // in and shows "Error opening event", so we require both before taking this path.
+        if (eventId.isNotBlank() && calendarId.isNotBlank() && isPackageInstalled(context, PROTON_CALENDAR)) {
             val uri = Uri.Builder()
                 .scheme("proton-calendar")
                 .authority("protonmail.com")
                 .appendPath("event")
                 .appendPath("details")
                 .appendQueryParameter("eventId", eventId)
+                .appendQueryParameter("calendarId", calendarId)
                 .appendQueryParameter("occurrenceNumber", "0")
                 .build()
             val intent = Intent(Intent.ACTION_VIEW, uri)

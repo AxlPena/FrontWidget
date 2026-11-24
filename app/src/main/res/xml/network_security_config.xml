@@ -17,12 +17,19 @@
           | openssl dgst -sha256 -binary | openssl enc -base64
 -->
 <network-security-config>
+    <!--
+      Pin only the hosts our own code talks to over TLS: api.monarch.com (MonarchApi.kt +
+      MonarchWeeklySpendClient) and app.monarch.com (the login WebView's document/session host),
+      both served by Google Trust Services (WE1 leaf). includeSubdomains is intentionally OFF:
+      static.monarch.com (the SPA's JS/CSS CDN) is fronted by a *different* CA, so pinning it with
+      the WE1/R4 pins makes every login-page subresource fail the handshake (Chromium surfaces this
+      as net_error -202 / ERR_CERT_AUTHORITY_INVALID) and the sign-in page renders blank.
+    -->
     <domain-config>
-        <domain includeSubdomains="true">monarch.com</domain>
+        <domain includeSubdomains="false">api.monarch.com</domain>
+        <domain includeSubdomains="false">app.monarch.com</domain>
         <pin-set expiration="2027-06-01">
-            <!-- Google Trust Services "WE1" issuing intermediate (primary). -->
             <pin digest="SHA-256">kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=</pin>
-            <!-- GTS Root R4 (backup, survives intermediate rotation). -->
             <pin digest="SHA-256">mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=</pin>
         </pin-set>
     </domain-config>

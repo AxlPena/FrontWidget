@@ -1,7 +1,10 @@
 package com.saveory.frontwidget
 
 import android.os.Bundle
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -90,6 +93,23 @@ class MonarchLoginActivity : ComponentActivity() {
 }
 
 private enum class Step { CREDENTIALS, EMAIL_OTP, MFA, CAPTCHA }
+
+/**
+ * Hosts the Monarch login WebView is allowed to navigate to: Monarch itself plus the bot-challenge /
+ * CAPTCHA providers its login embeds (Cloudflare Turnstile, reCAPTCHA, hCaptcha). Everything else is
+ * blocked so an authenticated session can't be redirected to an arbitrary origin.
+ */
+private fun isAllowedLoginHost(host: String): Boolean {
+    val allowedSuffixes = listOf(
+        "monarch.com",
+        "cloudflare.com",     // challenges.cloudflare.com (Turnstile)
+        "hcaptcha.com",
+        "recaptcha.net",
+        "google.com",         // www.google.com/recaptcha
+        "gstatic.com"         // recaptcha assets
+    )
+    return allowedSuffixes.any { host == it || host.endsWith(".$it") }
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -346,22 +366,41 @@ private fun CaptchaScreen(onCookies: (Map<String, String>) -> Unit) {
                 factory = { ctx ->
                     CookieManager.getInstance().setAcceptCookie(true)
                     WebView(ctx).apply {
-                        // First-party Monarch cookies only; the auth flow needs no third-party cookies.
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+                        // The Cloudflare challenge and Monarch SPA set cross-origin cookies (e.g. the
+                        // Turnstile iframe on challenges.cloudflare.com), so third-party cookies must be
+                        // allowed or the challenge can't complete.
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         settings.javaScriptEnabled = true // required by the Monarch login SPA
                         settings.domStorageEnabled = true
                         settings.allowFileAccess = false
                         settings.allowContentAccess = false
+                        // Let the Monarch SPA's own <meta viewport> drive layout. Forcing
+                        // useWideViewPort/loadWithOverviewMode made the page lay out at desktop
+                        // width and overflow the WebView (logo cut off at top, form pushed
+                        // off-screen, only the cookie banner visible).
+                        // The default Android WebView UA carries a "; wv" token that Cloudflare Bot
+                        // Management and the Monarch SPA treat as an unsupported/bot browser — which is
+                        // why the page came back blank (just a cookie banner). Strip the "wv" marker so
+                        // we present as regular mobile Chrome and get the full login experience.
+                        settings.userAgentString = settings.userAgentString.replace("; wv", "")
+                        // Surface page console errors to logcat (tag "MonarchCaptcha") for diagnosis.
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
+                                Log.d("MonarchCaptcha", "${msg.messageLevel()} ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}")
+                                return true
+                            }
+                        }
                         webViewClient = object : WebViewClient() {
-                            // Keep the authenticated WebView pinned to Monarch origins so a redirect
-                            // or injected navigation can't run in-session on an arbitrary host.
+                            // Keep the authenticated WebView pinned to Monarch (and the challenge/CAPTCHA
+                            // providers it embeds) so a redirect or injected navigation can't run
+                            // in-session on an arbitrary host, while still letting the Cloudflare
+                            // Turnstile / reCAPTCHA / hCaptcha frames the login needs actually load.
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
                                 request: WebResourceRequest?
                             ): Boolean {
                                 val host = request?.url?.host ?: return true
-                                val allowed = host == "monarch.com" || host.endsWith(".monarch.com")
-                                return !allowed // true = we handled (blocked) the navigation
+                                return !isAllowedLoginHost(host) // true = we handled (blocked) the navigation
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -369,7 +408,23 @@ private fun CaptchaScreen(onCookies: (Map<String, String>) -> Unit) {
                                 capture()?.let { delivered = true; onCookies(it) }
                             }
                         }
-                        loadUrl("https://app.monarch.com/login")
+                        // Defer the load until the WebView has a real (measured) size. In a Compose
+                        // AndroidView the factory runs before layout, so loadUrl() here would hand
+                        // the Monarch SPA a 0-height viewport at mount. Loading once width/height are
+                        // known is the correct order and avoids a class of SPA layout-at-zero bugs.
+                        val loaded = booleanArrayOf(false)
+                        addOnLayoutChangeListener(object : android.view.View.OnLayoutChangeListener {
+                            override fun onLayoutChange(
+                                v: android.view.View?, l: Int, t: Int, r: Int, b: Int,
+                                ol: Int, ot: Int, or_: Int, ob: Int
+                            ) {
+                                if (!loaded[0] && (r - l) > 0 && (b - t) > 0) {
+                                    loaded[0] = true
+                                    removeOnLayoutChangeListener(this)
+                                    loadUrl("https://app.monarch.com/login")
+                                }
+                            }
+                        })
                     }
                 }
             )

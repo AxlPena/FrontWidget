@@ -247,12 +247,13 @@ class TimerListenerService : NotificationListenerService() {
             // linger after the child timers are gone and, on some builds, expose a stale time string
             // that would be misread as a still-running timer.
             if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) continue
-            // Never treat a FIRING notification as a running countdown. Clock shares one "Firing"
-            // channel for alarms AND timers ("Firing alarms & timers"), and a firing alarm's title
-            // is a clock time like "6:12" that parseRemaining() would misread as "6:12 remaining" -
-            // showing a phantom timer whenever an alarm goes off. Running timers live on the "Timers"
-            // channel; the Firing channel only appears once something has already ended.
-            if (n.channelId == FIRING_CHANNEL) continue
+            // Only the "Timers" channel carries a RUNNING countdown. Positively allow-list it
+            // rather than just excluding "Firing": Google Clock also posts an "Upcoming Alarms"
+            // channel notification for a scheduled alarm, and timerFinish() would read its alarm
+            // time as a running timer - so merely setting an alarm made a phantom countdown appear
+            // on the widget (the reported "if alarms go off the time counter appears" bug). Firing
+            // alarms/timers live on "Firing"; both are excluded by requiring "Timers" here.
+            if (n.channelId != TIMERS_CHANNEL) continue
             val finish = timerFinish(n) ?: continue
             if (finish > now && finish < soonest) soonest = finish
         }
@@ -332,6 +333,9 @@ class TimerListenerService : NotificationListenerService() {
         const val TAG = "TimerListener"
         const val CLOCK_PKG = "com.google.android.deskclock"
         const val FIRING_CHANNEL = "Firing"
+        // Google Clock's channel id for a RUNNING countdown timer (distinct from "Firing" and
+        // "Upcoming Alarms"). Only this channel is a real running timer.
+        const val TIMERS_CHANNEL = "Timers"
 
         /**
          * Pure classifier for a firing Clock notification, split out so it is unit-testable without

@@ -83,10 +83,30 @@ object MonarchApi {
             conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val status = conn.responseCode
             val body = readBody(conn)
+
+            // Monarch is fronted by Cloudflare Bot Management. The native HttpURLConnection client is
+            // sometimes served a Cloudflare JS challenge / 5xx interstitial (an HTML page, often with
+            // a `__CF$cv$params` script) instead of the JSON API. The native client can't execute a JS
+            // challenge, so treat any non-JSON/HTML body as "needs the interactive WebView" and hand
+            // off to the CAPTCHA fallback (a real browser engine that CAN clear the challenge and
+            // capture the session cookies) rather than dumping raw HTML into the error field.
+            val looksLikeHtmlChallenge = body.isNotBlank() && run {
+                val head = body.trimStart().take(512)
+                head.startsWith("<") ||
+                    head.contains("__CF\$cv\$params") ||
+                    head.contains("<!doctype html", ignoreCase = true) ||
+                    head.contains("<html", ignoreCase = true)
+            }
+            if (looksLikeHtmlChallenge) {
+                Log.w(TAG, "Login got a non-JSON/Cloudflare response (HTTP $status); routing to WebView")
+                return LoginOutcome.CaptchaRequired
+            }
+
             val json = try {
                 if (body.isNotBlank()) JSONObject(body) else JSONObject()
             } catch (e: Exception) {
-                JSONObject().put("detail", body)
+                // Defensive: a non-HTML body that still isn't valid JSON. Don't echo the raw payload.
+                return LoginOutcome.Failed("Unexpected sign-in response (HTTP $status)")
             }
 
             if (status == 200) {
